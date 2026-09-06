@@ -1,9 +1,9 @@
 package com.echos.app
 
-import android.content.Intent
-import android.content.pm.PackageManager
 import android.os.Bundle
+import android.graphics.drawable.Drawable
 import android.widget.EditText
+import android.widget.ImageView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
@@ -11,7 +11,7 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.button.MaterialButton
 
-/** 分应用代理：选择走代理（或排除）的应用列表。 */
+/** 分应用代理：选择走代理（或排除）的应用列表。已勾选项置顶。 */
 class AppPickerActivity : AppCompatActivity() {
 
     private val selected = mutableSetOf<String>()
@@ -28,13 +28,19 @@ class AppPickerActivity : AppCompatActivity() {
             if (mode == "allow") "选择走代理的应用" else "选择不走代理的应用"
 
         val pm = packageManager
-        val apps = pm.getInstalledApplications(0)
+        val apps = pm.getInstalledApplications(PackageManager.GET_META_DATA)
             .filter {
-                it.enabled &&
-                    pm.getLaunchIntentForPackage(it.packageName) != null
+                it.enabled && it.packageName != packageName
             }
-            .sortedBy { pm.getApplicationLabel(it).toString().lowercase() }
-            .map { AppItem(pm.getApplicationLabel(it).toString(), it.packageName) }
+            .map {
+                AppItem(
+                    pm.getApplicationLabel(it).toString(),
+                    it.packageName,
+                    it.loadIcon(pm)
+                )
+            }
+            .distinctBy { it.pkg }
+            .sortedWith(compareByDescending<AppItem> { it.pkg in selected }.thenBy { it.label.lowercase() })
 
         adapter = AppListAdapter(apps, selected)
         val rv = findViewById<RecyclerView>(R.id.appList)
@@ -59,7 +65,7 @@ class AppPickerActivity : AppCompatActivity() {
     }
 }
 
-data class AppItem(val label: String, val pkg: String)
+data class AppItem(val label: String, val pkg: String, val icon: Drawable)
 
 class AppListAdapter(
     private val all: List<AppItem>,
@@ -68,31 +74,42 @@ class AppListAdapter(
 
     private var visible = all.toList()
 
-    class VH(val root: com.google.android.material.checkbox.MaterialCheckBox) :
-        RecyclerView.ViewHolder(root)
+    class VH(val root: android.view.View) : RecyclerView.ViewHolder(root)
 
     fun filter(q: String) {
         visible = if (q.isBlank()) all.toList()
-        else all.filter {
-            it.label.contains(q, true) || it.pkg.contains(q, true)
-        }
+        else all.filter { it.label.contains(q, true) || it.pkg.contains(q, true) }
+        // 搜索后仍保持已选项置顶
+        visible = visible.sortedWith(compareByDescending<AppItem> { it.pkg in selected }.thenBy { it.label.lowercase() })
         notifyDataSetChanged()
     }
 
     override fun onCreateViewHolder(parent: android.view.ViewGroup, viewType: Int): VH =
-        VH(com.google.android.material.checkbox.MaterialCheckBox(parent.context))
+        VH(android.view.LayoutInflater.from(parent.context).inflate(R.layout.item_app_row, parent, false))
 
     override fun getItemCount(): Int = visible.size
 
     override fun onBindViewHolder(h: VH, pos: Int) {
         val item = visible[pos]
-        val cb = h.root
-        cb.text = "${item.label}\n${item.pkg}"
-        cb.isChecked = item.pkg in selected
+        val icon = h.root.findViewById<ImageView>(R.id.appIcon)
+        val label = h.root.findViewById<TextView>(R.id.appLabel)
+        val pkg = h.root.findViewById<TextView>(R.id.appPackage)
+        val cb = h.root.findViewById<com.google.android.material.checkbox.MaterialCheckBox>(R.id.appCheck)
+
+        icon.setImageDrawable(item.icon)
+        label.text = item.label
+        pkg.text = item.pkg
         cb.setOnCheckedChangeListener(null)
         cb.isChecked = item.pkg in selected
         cb.setOnCheckedChangeListener { _, checked ->
             if (checked) selected.add(item.pkg) else selected.remove(item.pkg)
+            // 立即把当前勾选项移动到顶部
+            val i = visible.indexOfFirst { it.pkg == item.pkg }
+            if (i >= 0) {
+                visible = visible.sortedWith(compareByDescending<AppItem> { it.pkg in selected }.thenBy { it.label.lowercase() })
+                notifyDataSetChanged()
+            }
         }
+        h.root.setOnClickListener { cb.performClick() }
     }
 }

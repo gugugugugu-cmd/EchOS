@@ -46,6 +46,29 @@ class ProxyService : Service() {
 
         fun clearLogs() = synchronized(logBuffer) { logBuffer.clear() }
 
+        /** 唯一的前台通知：VPN/本地代理共用通知 ID。 */
+        fun buildUnifiedNotification(ctx: Context): Notification {
+            val vpn = EchVpnService.isVpnRunning
+            val pi = PendingIntent.getActivity(
+                ctx, 0, Intent(ctx, MainActivity::class.java),
+                PendingIntent.FLAG_IMMUTABLE
+            )
+            return NotificationCompat.Builder(ctx, CHANNEL_ID)
+                .setSmallIcon(R.drawable.ic_stat)
+                .setContentTitle(if (vpn) "EchOS VPN 运行中" else ctx.getString(R.string.notif_title))
+                .setContentText(if (vpn) "全部流量经 ECH 隧道转发" else ctx.getString(R.string.notif_text))
+                .setOngoing(true)
+                .setContentIntent(pi)
+                .build()
+        }
+
+        /** 根据当前模式刷新唯一前台通知。 */
+        fun refreshNotification(ctx: Context) {
+            if (!isRunning) return
+            val nm = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            nm.notify(NOTIF_ID, buildUnifiedNotification(ctx))
+        }
+
         /** 重启内核（配置变更后调用）。 */
         fun restart(ctx: Context) {
             ctx.startService(
@@ -97,22 +120,17 @@ class ProxyService : Service() {
 
     override fun onDestroy() {
         stopProxy()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            stopForeground(STOP_FOREGROUND_REMOVE)
+        } else {
+            @Suppress("DEPRECATION")
+            stopForeground(true)
+        }
+        getSystemService(NotificationManager::class.java).cancel(NOTIF_ID)
         super.onDestroy()
     }
 
-    private fun buildNotification(): Notification {
-        val pi = PendingIntent.getActivity(
-            this, 0, Intent(this, MainActivity::class.java),
-            PendingIntent.FLAG_IMMUTABLE
-        )
-        return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_stat)
-            .setContentTitle(getString(R.string.notif_title))
-            .setContentText(getString(R.string.notif_text))
-            .setOngoing(true)
-            .setContentIntent(pi)
-            .build()
-    }
+    private fun buildNotification(): Notification = buildUnifiedNotification(this)
 
     private fun startForegroundCompat() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {

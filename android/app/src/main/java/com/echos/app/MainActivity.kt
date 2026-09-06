@@ -76,10 +76,11 @@ class MainActivity : AppCompatActivity() {
 
         btnStart.setOnClickListener { onStartClicked() }
         btnStop.setOnClickListener {
-            // 直接停止两个 Service：确保 EchVpnService.onDestroy() 被调用，
-            // 由 onDestroy 关闭原始 TUN fd，系统 VPN 状态随之拆除。
-            stopService(Intent(this, EchVpnService::class.java))
+            // 先给 VPN 服务一个明确的清理动作，再 stopService 兜底关闭 TUN fd。
+            EchVpnService.stop(this)
             stopService(Intent(this, ProxyService::class.java))
+            getSystemService(android.app.NotificationManager::class.java)
+                .cancel(ProxyService.NOTIF_ID)
         }
 
         if (Build.VERSION.SDK_INT >= 33) {
@@ -165,8 +166,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun startVpn() {
-        ContextCompat.startForegroundService(
-            this, Intent(this, EchVpnService::class.java)
+        // App 当前在前台，直接启动 VpnService；唯一前台通知由 ProxyService 持有。
+        startService(
+            Intent(this, EchVpnService::class.java)
                 .setAction(EchVpnService.ACTION_START)
         )
     }

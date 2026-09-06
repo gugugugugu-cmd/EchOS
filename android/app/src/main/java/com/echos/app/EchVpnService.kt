@@ -1,11 +1,9 @@
 package com.echos.app
 
 import android.content.Intent
-import android.content.pm.ServiceInfo
 import android.net.VpnService
 import android.os.Build
 import android.os.ParcelFileDescriptor
-import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import java.io.File
 
@@ -32,6 +30,16 @@ class EchVpnService : VpnService() {
         @Volatile
         var isVpnRunning = false
             private set
+
+        /** 可靠停止：先让服务清理 TUN，再取消 started 状态。 */
+        fun stop(context: android.content.Context) {
+            context.startService(Intent(context, EchVpnService::class.java).setAction(ACTION_STOP))
+            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                context.stopService(Intent(context, EchVpnService::class.java))
+                context.getSystemService(android.app.NotificationManager::class.java)
+                    .cancel(ProxyService.NOTIF_ID)
+            }, 300)
+        }
     }
 
     private val tproxy = hev.htproxy.TProxyService()
@@ -52,7 +60,8 @@ class EchVpnService : VpnService() {
                 return START_NOT_STICKY
             }
             else -> {
-                startForegroundCompat()
+                // 唯一前台通知由 ProxyService 持有；本服务只管理 VPN/TUN。
+                // 代理服务已启动时，启动完成后刷新同一条通知。
                 // 进程被系统重启后 isVpnRunning 可能丢失：hev 若仍在跑，先停再启
                 val hevAlive = try {
                     tproxy.TProxyIsRunning()
@@ -69,29 +78,6 @@ class EchVpnService : VpnService() {
     override fun onDestroy() {
         stopVpnInternal()
         super.onDestroy()
-    }
-
-    private fun startForegroundCompat() {
-        val notif = NotificationCompat.Builder(this, ProxyService.CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_stat)
-            .setContentTitle("EchOS VPN 运行中")
-            .setContentText("全部流量经 ECH 隧道转发")
-            .setOngoing(true)
-            .setContentIntent(
-                android.app.PendingIntent.getActivity(
-                    this, 0, Intent(this, MainActivity::class.java),
-                    android.app.PendingIntent.FLAG_IMMUTABLE
-                )
-            )
-            .build()
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(
-                ProxyService.NOTIF_ID + 1, notif,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
-            )
-        } else {
-            startForeground(ProxyService.NOTIF_ID + 1, notif)
-        }
     }
 
     private fun startVpn() {
@@ -222,6 +208,7 @@ class EchVpnService : VpnService() {
         }
         isVpnRunning = true
         ProxyService.log("[VPN] TUN 已建立，全局接管生效（SOCKS5 127.0.0.1:$socksPort）")
+        ProxyService.refreshNotification(this)
     }
 
     /** 完整停止：停 hev 转发 + 关闭 TUN fd（拆除系统 VPN 接口）。 */
@@ -243,6 +230,12 @@ class EchVpnService : VpnService() {
         if (isVpnRunning) {
             isVpnRunning = false
             ProxyService.log("[VPN] 全局接管已停止")
+        }
+        if (ProxyService.isRunning) {
+            ProxyService.refreshNotification(this)
+        } else {
+            getSystemService(android.app.NotificationManager::class.java)
+                .cancel(ProxyService.NOTIF_ID)
         }
     }
 }
