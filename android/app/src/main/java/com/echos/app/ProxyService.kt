@@ -11,6 +11,7 @@ import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
 import java.io.BufferedReader
 import java.io.File
 import java.io.InputStreamReader
@@ -44,6 +45,18 @@ class ProxyService : Service() {
         }
 
         fun clearLogs() = synchronized(logBuffer) { logBuffer.clear() }
+
+        /** 重启内核（配置变更后调用）。 */
+        fun restart(ctx: Context) {
+            ctx.startService(
+                Intent(ctx, ProxyService::class.java).setAction(ACTION_STOP)
+            )
+            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                ContextCompat.startForegroundService(
+                    ctx, Intent(ctx, ProxyService::class.java).setAction(ACTION_START)
+                )
+            }, 600)
+        }
 
         /** 供 ProxyService 与 EchVpnService 共用。 */
         fun createChannelStatic(ctx: Context) {

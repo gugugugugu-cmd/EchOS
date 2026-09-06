@@ -5,7 +5,7 @@
     android:id="@+id/cardRoot"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:layout_marginBottom="12dp"
+    android:layout_marginBottom="10dp"
     android:clickable="true"
     android:focusable="true"
     app:cardCornerRadius="14dp"
@@ -15,71 +15,39 @@
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:orientation="vertical"
-        android:padding="14dp">
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingHorizontal="16dp"
+        android:paddingVertical="18dp">
 
-        <LinearLayout
-            android:layout_width="match_parent"
+        <TextView
+            android:id="@+id/cardText"
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:gravity="center_vertical"
-            android:orientation="horizontal">
+            android:layout_weight="1"
+            android:ellipsize="end"
+            android:fontFamily="monospace"
+            android:singleLine="true"
+            android:text="23.144.20.184:32292"
+            android:textSize="16sp" />
 
-            <TextView
-                android:id="@+id/cardTitle"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="线路 1"
-                android:textSize="15sp"
-                android:textStyle="bold" />
-
-            <TextView
-                android:id="@+id/cardActive"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginEnd="8dp"
-                android:text="✓ 使用中"
-                android:textColor="#0B57D0"
-                android:textSize="13sp"
-                android:visibility="gone" />
-
-            <ImageButton
-                android:id="@+id/cardDelete"
-                android:layout_width="32dp"
-                android:layout_height="32dp"
-                android:background="?attr/selectableItemBackgroundBorderless"
-                android:contentDescription="删除线路"
-                android:src="@android:drawable/ic_menu_delete"
-                android:tint="#888888" />
-        </LinearLayout>
-
-        <com.google.android.material.textfield.TextInputLayout
-            style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
-            android:layout_width="match_parent"
+        <TextView
+            android:id="@+id/cardActive"
+            android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:hint="优选 IP（域名），逗号分隔">
+            android:layout_marginStart="10dp"
+            android:text="✓ 使用中"
+            android:textColor="#0B57D0"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:visibility="gone" />
 
-            <com.google.android.material.textfield.TextInputEditText
-                android:id="@+id/editIps"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:inputType="textUri"
-                android:singleLine="true" />
-        </com.google.android.material.textfield.TextInputLayout>
-
-        <com.google.android.material.textfield.TextInputLayout
-            style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
-            android:layout_width="match_parent"
+        <TextView
+            android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:hint="服务端口">
-
-            <com.google.android.material.textfield.TextInputEditText
-                android:id="@+id/editPort"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:inputType="number"
-                android:singleLine="true" />
-        </com.google.android.material.textfield.TextInputLayout>
+            android:layout_marginStart="8dp"
+            android:text="›"
+            android:textColor="#999999"
+            android:textSize="18sp" />
     </LinearLayout>
 </com.google.android.material.card.MaterialCardView>

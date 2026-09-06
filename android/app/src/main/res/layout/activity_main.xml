@@ -1,12 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
     android:padding="16dp">
 
-    <!-- 顶栏：+ 添加线路 | 标题 | 设置 -->
+    <!-- 顶栏：+ 添加线路 | 标题 | 日志 | 设置 -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -33,18 +32,27 @@
             android:textStyle="bold" />
 
         <TextView
-            android:id="@+id/btnSettings"
+            android:id="@+id/btnLogs"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:background="?attr/selectableItemBackgroundBorderless"
             android:padding="6dp"
-            android:text="⚙ 设置"
-            android:textSize="15sp" />
+            android:text="📋"
+            android:textSize="17sp" />
+
+        <TextView
+            android:id="@+id/btnSettings"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="4dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:padding="6dp"
+            android:text="⚙"
+            android:textSize="18sp" />
     </LinearLayout>
 
     <!-- 线路卡片滚动区 -->
     <ScrollView
-        android:id="@+id/cardsScroll"
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_marginTop="8dp"
@@ -81,27 +89,4 @@
         android:layout_marginTop="8dp"
         android:enabled="false"
         android:text="@string/stop" />
-
-    <TextView
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="10dp"
-        android:text="日志"
-        android:textSize="12sp" />
-
-    <ScrollView
-        android:layout_width="match_parent"
-        android:layout_height="170dp"
-        android:layout_marginTop="4dp"
-        android:background="#F5F5F5">
-
-        <TextView
-            android:id="@+id/logView"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:fontFamily="monospace"
-            android:padding="8dp"
-            android:textIsSelectable="true"
-            android:textSize="11sp" />
-    </ScrollView>
 </LinearLayout>

@@ -175,7 +175,15 @@ class EchVpnService : VpnService() {
     }
 
     private fun stopVpn() {
-        if (!isVpnRunning) return
+        if (!isVpnRunning) {
+            // 兜底：进程被系统重启过时标志位会丢失，但 VPN 接口可能还在，
+            // 直接尝试停一次 hev，避免出现"点了停止但 VPN 不断开"。
+            try {
+                tproxy.TProxyStopService()
+            } catch (_: Throwable) {
+            }
+            return
+        }
         isVpnRunning = false
         try {
             tproxy.TProxyStopService()

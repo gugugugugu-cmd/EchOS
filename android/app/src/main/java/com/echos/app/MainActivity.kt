@@ -9,11 +9,8 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
-import android.view.LayoutInflater
 import android.view.View
-import android.widget.ImageButton
 import android.widget.LinearLayout
-import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
@@ -22,22 +19,15 @@ import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.card.MaterialCardView
-import com.google.android.material.textfield.TextInputEditText
 
 class MainActivity : AppCompatActivity() {
 
     private lateinit var cardsContainer: LinearLayout
-    private lateinit var cardsScroll: ScrollView
     private lateinit var btnStart: MaterialButton
     private lateinit var btnStop: MaterialButton
     private lateinit var statusView: TextView
-    private lateinit var logView: TextView
-
-    private val cards = mutableListOf(ConfigStore.EntryCard("", 443))
-    private var activeCard = 0
 
     private val handler = Handler(Looper.getMainLooper())
-    private var lastLogSize = -1
 
     private val vpnPermissionLauncher =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
@@ -48,19 +38,8 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-    private val settingsLauncher =
-        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
-            // 设置页返回后，若代理在跑则重启内核以应用新设置
-            restartIfRunning()
-        }
-
     private val tick = object : Runnable {
         override fun run() {
-            val lines = ProxyService.logLines()
-            if (lines.size != lastLogSize) {
-                lastLogSize = lines.size
-                logView.text = lines.joinToString("\n")
-            }
             val running = ProxyService.isRunning
             val vpn = EchVpnService.isVpnRunning
             statusView.text = when {
@@ -80,27 +59,20 @@ class MainActivity : AppCompatActivity() {
         setContentView(R.layout.activity_main)
 
         cardsContainer = findViewById(R.id.cardsContainer)
-        cardsScroll = findViewById(R.id.cardsScroll)
         btnStart = findViewById(R.id.btnStart)
         btnStop = findViewById(R.id.btnStop)
         statusView = findViewById(R.id.statusView)
-        logView = findViewById(R.id.logView)
 
         findViewById<View>(R.id.btnAddCard).setOnClickListener {
-            addCard(ConfigStore.EntryCard("", 443))
+            val idx = ConfigStore.addCard(this, ConfigStore.EntryCard("", 443))
+            openCardEditor(idx)
+        }
+        findViewById<View>(R.id.btnLogs).setOnClickListener {
+            startActivity(Intent(this, LogActivity::class.java))
         }
         findViewById<View>(R.id.btnSettings).setOnClickListener {
-            settingsLauncher.launch(Intent(this, SettingsActivity::class.java))
+            startActivity(Intent(this, SettingsActivity::class.java))
         }
-
-        ConfigStore.load(this)?.let { cfg ->
-            if (cfg.cards.isNotEmpty()) {
-                cards.clear()
-                cards.addAll(cfg.cards)
-            }
-            activeCard = cfg.activeCard.coerceIn(0, cards.size - 1)
-        }
-        rebuildCards()
 
         btnStart.setOnClickListener { onStartClicked() }
         btnStop.setOnClickListener {
@@ -121,12 +93,12 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        rebuildCards()
         handler.post(tick)
     }
 
     override fun onPause() {
         handler.removeCallbacks(tick)
-        saveConfig()
         super.onPause()
     }
 
@@ -134,112 +106,29 @@ class MainActivity : AppCompatActivity() {
 
     private fun rebuildCards() {
         cardsContainer.removeAllViews()
-        cards.forEachIndexed { i, _ -> addCardView(i) }
-        highlightActive()
-    }
+        val cfg = ConfigStore.load(this) ?: ConfigStore.default()
+        cfg.cards.forEachIndexed { i, card ->
+            val v = layoutInflater.inflate(R.layout.item_entry_card, cardsContainer, false)
+            val cardRoot = v.findViewById<MaterialCardView>(R.id.cardRoot)
+            val rowText = v.findViewById<TextView>(R.id.cardText)
+            val activeTag = v.findViewById<TextView>(R.id.cardActive)
 
-    private fun addCardView(index: Int) {
-        val v = LayoutInflater.from(this)
-            .inflate(R.layout.item_entry_card, cardsContainer, false)
-        val card = v.findViewById<MaterialCardView>(R.id.cardRoot)
-        val title = v.findViewById<TextView>(R.id.cardTitle)
-        val editIps = v.findViewById<TextInputEditText>(R.id.editIps)
-        val editPort = v.findViewById<TextInputEditText>(R.id.editPort)
-        val delete = v.findViewById<ImageButton>(R.id.cardDelete)
-        val activeTag = v.findViewById<TextView>(R.id.cardActive)
-
-        val e = cards[index]
-        editIps.setText(e.ips)
-        editPort.setText(e.port.toString())
-        title.text = "线路 ${index + 1}"
-
-        fun commit() {
-            val i = cardsContainer.indexOfChild(v)
-            if (i < 0 || i >= cards.size) return
-            cards[i] = cards[i].copy(
-                ips = editIps.text?.toString()?.trim() ?: "",
-                port = editPort.text?.toString()?.toIntOrNull() ?: 443
-            )
-            saveConfig()
-        }
-        editIps.setOnFocusChangeListener { _, hasFocus -> if (!hasFocus) commit() }
-        editPort.setOnFocusChangeListener { _, hasFocus -> if (!hasFocus) commit() }
-
-        // 点卡片空白处切换使用线路
-        card.setOnClickListener {
-            val i = cardsContainer.indexOfChild(v)
-            if (i >= 0 && i != activeCard) {
-                activeCard = i
-                highlightActive()
-                saveConfig()
-                restartIfRunning()
-            }
-        }
-
-        delete.setOnClickListener {
-            val i = cardsContainer.indexOfChild(v)
-            if (cards.size <= 1) {
-                Toast.makeText(this, "至少保留一个线路卡片", Toast.LENGTH_SHORT).show()
-                return@setOnClickListener
-            }
-            cards.removeAt(i)
-            cardsContainer.removeView(v)
-            if (activeCard >= cards.size) activeCard = cards.size - 1
-            renumber()
-            highlightActive()
-            saveConfig()
-        }
-        cardsContainer.addView(v)
-    }
-
-    private fun addCard(e: ConfigStore.EntryCard) {
-        cards.add(e)
-        addCardView(cards.size - 1)
-        highlightActive()
-        saveConfig()
-        cardsScroll.post { cardsScroll.fullScroll(View.FOCUS_DOWN) }
-    }
-
-    private fun renumber() {
-        for (i in 0 until cardsContainer.childCount) {
-            cardsContainer.getChildAt(i)
-                .findViewById<TextView>(R.id.cardTitle).text = "线路 ${i + 1}"
-        }
-    }
-
-    private fun highlightActive() {
-        for (i in 0 until cardsContainer.childCount) {
-            val card = cardsContainer.getChildAt(i)
-                .findViewById<MaterialCardView>(R.id.cardRoot)
-            val active = i == activeCard
-            card.strokeWidth = if (active) 3 else 1
-            card.strokeColor =
+            rowText.text = card.display()
+            val active = i == cfg.activeCard
+            cardRoot.strokeWidth = if (active) 3 else 1
+            cardRoot.strokeColor =
                 if (active) Color.parseColor("#0B57D0") else Color.parseColor("#E0E0E0")
-            card.findViewById<TextView>(R.id.cardActive).visibility =
-                if (active) View.VISIBLE else View.GONE
+            activeTag.visibility = if (active) View.VISIBLE else View.GONE
+
+            cardRoot.setOnClickListener { openCardEditor(i) }
+            cardsContainer.addView(v)
         }
     }
 
-    // ==================== 配置 ====================
-
-    private fun saveConfig() {
-        val old = ConfigStore.load(this)
-        val s = ConfigStore.Server(
-            domain = old?.domain ?: "",
-            ech = old?.ech ?: "cloudflare-ech.com",
-            doh = old?.doh ?: "https://dns.alidns.com/dns-query",
-            token = old?.token ?: "",
-            listenAddr = old?.listenAddr ?: "127.0.0.1",
-            listenPort = old?.listenPort ?: 30000,
-            global = old?.global ?: true,
-            vpn = old?.vpn ?: true,
-            cards = cards.toList(),
-            activeCard = activeCard.coerceIn(0, (cards.size - 1).coerceAtLeast(0))
+    private fun openCardEditor(index: Int) {
+        startActivity(
+            Intent(this, CardEditActivity::class.java).putExtra("index", index)
         )
-        try {
-            ConfigStore.save(this, s)
-        } catch (_: Exception) {
-        }
     }
 
     // ==================== 启动 / 停止 ====================
@@ -249,12 +138,11 @@ class MainActivity : AppCompatActivity() {
         val card = cfg.active
         if (cfg.domain.isBlank() || card == null || card.port !in 1..65535) {
             Toast.makeText(
-                this, "请先在「⚙ 设置」填写服务地址，并确保当前线路端口有效",
+                this, "请先在「设置」填写服务地址，并确保当前线路端口有效",
                 Toast.LENGTH_LONG
             ).show()
             return
         }
-        saveConfig()
         if (Build.VERSION.SDK_INT >= 33 &&
             ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
             != PackageManager.PERMISSION_GRANTED
@@ -264,7 +152,6 @@ class MainActivity : AppCompatActivity() {
             )
         }
         ProxyService.clearLogs()
-        lastLogSize = -1
         ContextCompat.startForegroundService(
             this, Intent(this, ProxyService::class.java)
                 .setAction(ProxyService.ACTION_START)
@@ -284,18 +171,5 @@ class MainActivity : AppCompatActivity() {
             this, Intent(this, EchVpnService::class.java)
                 .setAction(EchVpnService.ACTION_START)
         )
-    }
-
-    private fun restartIfRunning() {
-        if (!ProxyService.isRunning) return
-        startService(
-            Intent(this, ProxyService::class.java).setAction(ProxyService.ACTION_STOP)
-        )
-        handler.postDelayed({
-            ContextCompat.startForegroundService(
-                this, Intent(this, ProxyService::class.java)
-                    .setAction(ProxyService.ACTION_START)
-            )
-        }, 600)
     }
 }

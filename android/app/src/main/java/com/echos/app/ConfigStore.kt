@@ -10,9 +10,11 @@ object ConfigStore {
 
     /** 一条线路：优选IP(域名) + 服务端口。 */
     data class EntryCard(
-        val ips: String,   // 优选 IP（域名），逗号分隔，可空（走域名解析）
+        val ips: String,   // 优选 IP（域名），可空（走域名解析）
         val port: Int      // 服务端口
-    )
+    ) {
+        fun display(): String = "${ips.ifBlank { "默认解析" }}:$port"
+    }
 
     data class Server(
         val domain: String,      // 服务地址（域名，设置页）
@@ -40,48 +42,50 @@ object ConfigStore {
         if (!file.exists()) return null
         return try {
             ctx.openFileInput(FILE).bufferedReader().use { r ->
-                val o = JSONObject(r.readText())
-
-                // 旧版兼容：addr = "域名:端口"
-                val domain: String
-                val legacyPort: Int
-                if (o.has("domain")) {
-                    domain = o.getString("domain")
-                    legacyPort = 443
-                } else {
-                    val addr = o.optString("addr", "")
-                    val idx = addr.lastIndexOf(':')
-                    domain = if (idx > 0) addr.substring(0, idx) else addr
-                    legacyPort = if (idx > 0) addr.substring(idx + 1).toIntOrNull() ?: 443 else 443
-                }
-
-                val cards = mutableListOf<EntryCard>()
-                val arr = o.optJSONArray("cards")
-                if (arr != null && arr.length() > 0) {
-                    for (i in 0 until arr.length()) {
-                        val c = arr.getJSONObject(i)
-                        cards.add(EntryCard(c.optString("ips", ""), c.optInt("port", 443)))
-                    }
-                } else {
-                    cards.add(EntryCard(o.optString("ips", ""), legacyPort))
-                }
-
-                Server(
-                    domain = domain,
-                    ech = o.optString("ech", "cloudflare-ech.com"),
-                    doh = o.optString("doh", "https://dns.alidns.com/dns-query"),
-                    token = o.optString("token", ""),
-                    listenAddr = o.optString("listenAddr", "127.0.0.1"),
-                    listenPort = o.optInt("listenPort", o.optInt("port", 30000)),
-                    global = o.optBoolean("global", true),
-                    vpn = o.optBoolean("vpn", true),
-                    cards = cards,
-                    activeCard = o.optInt("activeCard", 0)
-                )
+                parse(JSONObject(r.readText()))
             }
         } catch (e: Exception) {
             null
         }
+    }
+
+    private fun parse(o: JSONObject): Server {
+        // 旧版兼容：addr = "域名:端口"
+        val domain: String
+        val legacyPort: Int
+        if (o.has("domain")) {
+            domain = o.getString("domain")
+            legacyPort = 443
+        } else {
+            val addr = o.optString("addr", "")
+            val idx = addr.lastIndexOf(':')
+            domain = if (idx > 0) addr.substring(0, idx) else addr
+            legacyPort = if (idx > 0) addr.substring(idx + 1).toIntOrNull() ?: 443 else 443
+        }
+
+        val cards = mutableListOf<EntryCard>()
+        val arr = o.optJSONArray("cards")
+        if (arr != null && arr.length() > 0) {
+            for (i in 0 until arr.length()) {
+                val c = arr.getJSONObject(i)
+                cards.add(EntryCard(c.optString("ips", ""), c.optInt("port", 443)))
+            }
+        } else {
+            cards.add(EntryCard(o.optString("ips", ""), legacyPort))
+        }
+
+        return Server(
+            domain = domain,
+            ech = o.optString("ech", "cloudflare-ech.com"),
+            doh = o.optString("doh", "https://dns.alidns.com/dns-query"),
+            token = o.optString("token", ""),
+            listenAddr = o.optString("listenAddr", "127.0.0.1"),
+            listenPort = o.optInt("listenPort", o.optInt("port", 30000)),
+            global = o.optBoolean("global", true),
+            vpn = o.optBoolean("vpn", true),
+            cards = cards,
+            activeCard = o.optInt("activeCard", 0)
+        )
     }
 
     fun save(ctx: Context, s: Server) {
@@ -103,6 +107,42 @@ object ConfigStore {
         ctx.openFileOutput(FILE, Context.MODE_PRIVATE).use { out ->
             out.write(o.toString().toByteArray())
         }
+    }
+
+    // ==================== 单卡片操作（供编辑页使用） ====================
+
+    private fun mutate(ctx: Context, f: (Server) -> Server) {
+        val s = f(load(ctx) ?: default())
+        try {
+            save(ctx, s)
+        } catch (_: Exception) {
+        }
+    }
+
+    fun updateCard(ctx: Context, index: Int, card: EntryCard) = mutate(ctx) { s ->
+        if (index in s.cards.indices)
+            s.copy(cards = s.cards.mapIndexed { i, c -> if (i == index) card else c })
+        else s
+    }
+
+    fun removeCard(ctx: Context, index: Int) = mutate(ctx) { s ->
+        if (s.cards.size > 1 && index in s.cards.indices) {
+            val cards = s.cards.toMutableList()
+            cards.removeAt(index)
+            s.copy(cards = cards, activeCard = s.activeCard.coerceAtMost(cards.size - 1))
+        } else s
+    }
+
+    fun setActive(ctx: Context, index: Int) = mutate(ctx) { s ->
+        if (index in s.cards.indices) s.copy(activeCard = index) else s
+    }
+
+    /** 新增卡片，返回其下标。 */
+    fun addCard(ctx: Context, card: EntryCard): Int {
+        val s = load(ctx) ?: default()
+        val updated = s.copy(cards = s.cards + card)
+        save(ctx, updated)
+        return updated.cards.size - 1
     }
 
     /** 生成内核命令行参数（不含二进制路径），配置非法返回 null。 */

@@ -29,6 +29,16 @@
             android:exported="false"
             android:label="设置" />
 
+        <activity
+            android:name=".CardEditActivity"
+            android:exported="false"
+            android:label="编辑线路" />
+
+        <activity
+            android:name=".LogActivity"
+            android:exported="false"
+            android:label="日志" />
+
         <service
             android:name=".ProxyService"
             android:exported="false"
