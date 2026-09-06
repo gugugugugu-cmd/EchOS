@@ -1,7 +1,6 @@
 package com.echos.app
 
 import android.content.Intent
-import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.os.Bundle
 import android.widget.EditText
@@ -31,7 +30,7 @@ class AppPickerActivity : AppCompatActivity() {
         val pm = packageManager
         val apps = pm.getInstalledApplications(0)
             .filter {
-                (it.flags and ApplicationInfo.FLAG_ENABLED) != 0 &&
+                it.enabled &&
                     pm.getLaunchIntentForPackage(it.packageName) != null
             }
             .sortedBy { pm.getApplicationLabel(it).toString().lowercase() }
