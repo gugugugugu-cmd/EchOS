@@ -104,8 +104,8 @@ class EchVpnService : VpnService() {
             .addRoute("0.0.0.0", 0)
             .addRoute("::", 0)
         try {
-            // 核心：自身 UID 的流量（内核 WSS/DoH、hev 的控制连接）绕过 TUN
-            builder.addDisallowedApplication(applicationInfo.uid)
+            // 核心：自身包名的流量（内核 WSS/DoH、hev 的控制连接）绕过 TUN
+            builder.addDisallowedApplication(packageName)
         } catch (e: Exception) {
             ProxyService.log("[VPN] 排除自身失败: ${e.message}")
         }

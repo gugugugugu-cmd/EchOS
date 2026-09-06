@@ -11,8 +11,8 @@ macOS 版共用同一份内核源码（`core/`），编译为 Android 可执行�
 - `VpnService` 建立 TUN（全局 IPv4/IPv6 路由），`hev-socks5-tunnel`（JNI，
   官方 2.17.1）把全部流量转进内核 SOCKS5
 - DNS 走 mapdns（fake-IP）：域名以原始形式进入 SOCKS5，内核 geosite 分流可用
-- **自环规避**：`addDisallowedApplication(自身UID)`，内核的 WSS/DoH 出站
-  天然绕过 TUN（与内核同 UID），无路由死循环，无需 protect() 私有 API
+- **自环规避**：`addDisallowedApplication(packageName)`，内核的 WSS/DoH 出站
+  天然绕过 TUN（同包名），无路由死循环，无需 protect() 私有 API
 - UDP 转发：hev 的 socks5 udp 模式 → 内核 UDP 转发（配 block 443 端口）
 
 ### 本地代理模式（关闭 VPN 开关）
