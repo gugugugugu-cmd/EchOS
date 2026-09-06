@@ -13,7 +13,7 @@ import java.io.File
  * VPN 全局接管：VpnService 建立 TUN，hev-socks5-tunnel（JNI）把全部流量
  * 转 SOCKS5(127.0.0.1:1080) → 内核 → WSS+ECH → Worker。
  *
- * 关键点：addDisallowedApplication(自身 UID) —— 内核子进程与本 App 同 UID，
+ * 关键点：addDisallowedApplication(自身包名) —— 内核子进程与本 App 同包名，
  * 其出站（WSS/DoH/UDP）天然绕过 TUN，规避自环。
  *
  * DNS 用 mapdns（fake-IP）：App 的 DNS 查询由 hev 应答假 IP，后续会话以
@@ -47,12 +47,19 @@ class EchVpnService : VpnService() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_STOP -> {
-                stopVpn()
+                stopVpnInternal()
                 stopSelf()
                 return START_NOT_STICKY
             }
             else -> {
                 startForegroundCompat()
+                // 进程被系统重启后 isVpnRunning 可能丢失：hev 若仍在跑，先停再启
+                val hevAlive = try {
+                    tproxy.TProxyIsRunning()
+                } catch (_: Throwable) {
+                    false
+                }
+                if (hevAlive) stopVpnInternal()
                 if (!isVpnRunning) startVpn()
             }
         }
@@ -60,7 +67,7 @@ class EchVpnService : VpnService() {
     }
 
     override fun onDestroy() {
-        stopVpn()
+        stopVpnInternal()
         super.onDestroy()
     }
 
@@ -113,6 +120,40 @@ class EchVpnService : VpnService() {
         } catch (e: Exception) {
             ProxyService.log("[VPN] 排除自身失败: ${e.message}")
         }
+        // 分应用代理
+        when (cfg.appMode) {
+            "allow" -> {
+                cfg.appList.forEach { pkg ->
+                    try {
+                        builder.addAllowedApplication(pkg)
+                    } catch (e: Exception) {
+                        ProxyService.log("[VPN] 跳过不存在的应用: $pkg")
+                    }
+                }
+                ProxyService.log("[VPN] 分应用模式：仅 ${cfg.appList.size} 个应用走代理")
+            }
+            "exclude" -> {
+                cfg.appList.forEach { pkg ->
+                    try {
+                        builder.addDisallowedApplication(pkg)
+                    } catch (e: Exception) {
+                        ProxyService.log("[VPN] 跳过不存在的应用: $pkg")
+                    }
+                }
+                ProxyService.log("[VPN] 排除模式：${cfg.appList.size} 个应用不走代理")
+            }
+            else -> {
+                if (cfg.appList.isNotEmpty()) {
+                    // 兼容：有列表但模式丢失，按排除处理
+                    cfg.appList.forEach { pkg ->
+                        try {
+                            builder.addDisallowedApplication(pkg)
+                        } catch (_: Exception) {
+                        }
+                    }
+                }
+            }
+        }
         val pfd = builder.establish()
         if (pfd == null) {
             ProxyService.log("[VPN] TUN 建立失败（权限或配置问题）")
@@ -155,9 +196,11 @@ class EchVpnService : VpnService() {
             return
         }
 
-        // hev 接管 fd（内部会 close）
+        // hev 接管 fd：hev 不负责 close（TProxyStopService 只做转发清理），
+        // fd 归属保留在本服务，存入 tunFd，停止时显式关闭 —— 这正是
+        // 「停止后系统 VPN 状态残留」的根因：fd 开着，VpnService 接口就不会拆除。
         val fd = pfd.detachFd()
-        tunFd = null
+        tunFd = ParcelFileDescriptor.fromFd(fd)
         val ok = try {
             tproxy.TProxyStartService(conf.absolutePath, fd)
         } catch (e: Throwable) {
@@ -166,7 +209,8 @@ class EchVpnService : VpnService() {
         }
         if (!ok) {
             ProxyService.log("[VPN] hev 启动失败")
-            try { ParcelFileDescriptor.fromFd(fd).close() } catch (_: Exception) {}
+            try { tunFd?.close() } catch (_: Exception) {}
+            tunFd = null
             stopSelf()
             return
         }
@@ -174,21 +218,25 @@ class EchVpnService : VpnService() {
         ProxyService.log("[VPN] TUN 已建立，全局接管生效（SOCKS5 127.0.0.1:$socksPort）")
     }
 
-    private fun stopVpn() {
-        if (!isVpnRunning) {
-            // 兜底：进程被系统重启过时标志位会丢失，但 VPN 接口可能还在，
-            // 直接尝试停一次 hev，避免出现"点了停止但 VPN 不断开"。
-            try {
-                tproxy.TProxyStopService()
-            } catch (_: Throwable) {
-            }
-            return
-        }
-        isVpnRunning = false
+    /** 完整停止：停 hev 转发 + 关闭 TUN fd（拆除系统 VPN 接口）。 */
+    private fun stopVpnInternal() {
         try {
             tproxy.TProxyStopService()
         } catch (_: Throwable) {
         }
-        ProxyService.log("[VPN] 全局接管已停止")
+        // hev 停止是异步的，稍等它把读循环退出再关 fd，避免 EBADF 报错噪音
+        try {
+            Thread.sleep(150)
+        } catch (_: InterruptedException) {
+        }
+        try {
+            tunFd?.close()
+        } catch (_: Throwable) {
+        }
+        tunFd = null
+        if (isVpnRunning) {
+            isVpnRunning = false
+            ProxyService.log("[VPN] 全局接管已停止")
+        }
     }
 }

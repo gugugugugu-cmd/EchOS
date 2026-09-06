@@ -4,7 +4,7 @@ import android.content.Context
 import org.json.JSONArray
 import org.json.JSONObject
 
-/** 配置持久化：设置页（共享参数）+ 主界面多线路卡片。 */
+/** 配置持久化：设置页（共享参数）+ 主界面多线路卡片 + 分应用代理。 */
 object ConfigStore {
     private const val FILE = "server_config.json"
 
@@ -23,10 +23,11 @@ object ConfigStore {
         val token: String,       // 身份令牌
         val listenAddr: String,  // 监听地址
         val listenPort: Int,     // 本地 SOCKS5 端口（HTTP 自动 +1）
-        val global: Boolean,     // true=全局 false=规则分流
-        val vpn: Boolean,        // VPN 全局接管
+        val vpn: Boolean,        // true=VPN 全局接管 false=本地代理模式
         val cards: List<EntryCard>,
-        val activeCard: Int      // 当前使用线路下标
+        val activeCard: Int,     // 当前使用线路下标
+        val appMode: String,     // off=不分应用 allow=仅选中走代理 exclude=选中不走代理
+        val appList: List<String> // 分应用代理的应用包名列表
     ) {
         val active: EntryCard?
             get() = cards.getOrNull(activeCard)
@@ -74,6 +75,12 @@ object ConfigStore {
             cards.add(EntryCard(o.optString("ips", ""), legacyPort))
         }
 
+        val appList = mutableListOf<String>()
+        val appArr = o.optJSONArray("appList")
+        if (appArr != null) {
+            for (i in 0 until appArr.length()) appList.add(appArr.getString(i))
+        }
+
         return Server(
             domain = domain,
             ech = o.optString("ech", "cloudflare-ech.com"),
@@ -81,10 +88,11 @@ object ConfigStore {
             token = o.optString("token", ""),
             listenAddr = o.optString("listenAddr", "127.0.0.1"),
             listenPort = o.optInt("listenPort", o.optInt("port", 30000)),
-            global = o.optBoolean("global", true),
             vpn = o.optBoolean("vpn", true),
             cards = cards,
-            activeCard = o.optInt("activeCard", 0)
+            activeCard = o.optInt("activeCard", 0),
+            appMode = o.optString("appMode", "off"),
+            appList = appList
         )
     }
 
@@ -96,7 +104,6 @@ object ConfigStore {
         o.put("token", s.token)
         o.put("listenAddr", s.listenAddr)
         o.put("listenPort", s.listenPort)
-        o.put("global", s.global)
         o.put("vpn", s.vpn)
         val cardsArr = JSONArray()
         s.cards.forEach { c ->
@@ -104,6 +111,10 @@ object ConfigStore {
         }
         o.put("cards", cardsArr)
         o.put("activeCard", s.activeCard)
+        o.put("appMode", s.appMode)
+        val appArr = JSONArray()
+        s.appList.forEach { appArr.put(it) }
+        o.put("appList", appArr)
         ctx.openFileOutput(FILE, Context.MODE_PRIVATE).use { out ->
             out.write(o.toString().toByteArray())
         }
@@ -145,6 +156,11 @@ object ConfigStore {
         return updated.cards.size - 1
     }
 
+    /** 更新分应用代理设置（mode 传 null 表示保持不变）。 */
+    fun setAppFilter(ctx: Context, mode: String?, list: List<String>?) = mutate(ctx) { s ->
+        s.copy(appMode = mode ?: s.appMode, appList = list ?: s.appList)
+    }
+
     /** 生成内核命令行参数（不含二进制路径），配置非法返回 null。 */
     fun buildArgs(s: Server): List<String>? {
         val card = s.active ?: return null
@@ -156,7 +172,8 @@ object ConfigStore {
             "-n", "2",
             "-ech", s.ech,
             "-dns", s.doh,
-            "-default", if (s.global) "all" else "proxy"
+            // Android 版未打包 geo 数据，规则分流无意义，恒为全局
+            "-default", "all"
         )
         if (card.ips.isNotBlank()) args += listOf("-ip", card.ips)
         if (s.token.isNotBlank()) args += listOf("-token", s.token)
@@ -167,7 +184,8 @@ object ConfigStore {
         domain = "", ech = "cloudflare-ech.com",
         doh = "https://dns.alidns.com/dns-query", token = "",
         listenAddr = "127.0.0.1", listenPort = 30000,
-        global = true, vpn = true,
-        cards = listOf(EntryCard("", 443)), activeCard = 0
+        vpn = true,
+        cards = listOf(EntryCard("", 443)), activeCard = 0,
+        appMode = "off", appList = emptyList()
     )
 }

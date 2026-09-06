@@ -39,6 +39,11 @@
             android:exported="false"
             android:label="日志" />
 
+        <activity
+            android:name=".AppPickerActivity"
+            android:exported="false"
+            android:label="选择应用" />
+
         <service
             android:name=".ProxyService"
             android:exported="false"

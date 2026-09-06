@@ -1,38 +1,86 @@
 package com.echos.app
 
+import android.content.Intent
 import android.os.Bundle
+import android.widget.RadioButton
+import android.widget.RadioGroup
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.materialswitch.MaterialSwitch
 import com.google.android.material.textfield.TextInputEditText
 
-/** 设置页：服务地址 / 监听地址与端口 / ECH / DOH / TOKEN / 模式开关。 */
+/** 设置页：服务地址 / TOKEN / 监听地址与端口 / ECH / DOH / VPN / 分应用代理。 */
 class SettingsActivity : AppCompatActivity() {
+
+    private lateinit var switchVpn: MaterialSwitch
+    private lateinit var switchAppFilter: MaterialSwitch
+    private lateinit var rbAllow: RadioButton
+    private lateinit var rbExclude: RadioButton
+    private lateinit var rgAppMode: RadioGroup
+    private lateinit var btnPickApps: MaterialButton
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_settings)
 
         val editDomain = findViewById<TextInputEditText>(R.id.editDomain)
+        val editToken = findViewById<TextInputEditText>(R.id.editToken)
         val editListenAddr = findViewById<TextInputEditText>(R.id.editListenAddr)
         val editListenPort = findViewById<TextInputEditText>(R.id.editListenPort)
         val editEch = findViewById<TextInputEditText>(R.id.editEch)
         val editDoh = findViewById<TextInputEditText>(R.id.editDoh)
-        val editToken = findViewById<TextInputEditText>(R.id.editToken)
-        val switchGlobal = findViewById<MaterialSwitch>(R.id.switchGlobal)
-        val switchVpn = findViewById<MaterialSwitch>(R.id.switchVpn)
+        switchVpn = findViewById(R.id.switchVpn)
+        switchAppFilter = findViewById(R.id.switchAppFilter)
+        rgAppMode = findViewById(R.id.rgAppMode)
+        rbAllow = findViewById(R.id.rbAllow)
+        rbExclude = findViewById(R.id.rbExclude)
+        btnPickApps = findViewById(R.id.btnPickApps)
         val btnSave = findViewById<MaterialButton>(R.id.btnSave)
 
         ConfigStore.load(this)?.let { cfg ->
             editDomain.setText(cfg.domain)
+            editToken.setText(cfg.token)
             editListenAddr.setText(cfg.listenAddr)
             editListenPort.setText(cfg.listenPort.toString())
             editEch.setText(cfg.ech)
             editDoh.setText(cfg.doh)
-            editToken.setText(cfg.token)
-            switchGlobal.isChecked = cfg.global
             switchVpn.isChecked = cfg.vpn
+            switchAppFilter.isChecked = cfg.appMode != "off"
+            if (cfg.appMode == "exclude") rbExclude.isChecked = true else rbAllow.isChecked = true
+            refreshAppCount()
+        }
+
+        // 分应用开关/模式的改动立即持久化，方便跳转选择页时带上状态
+        switchAppFilter.setOnCheckedChangeListener { _, checked ->
+            if (checked) {
+                rgAppMode.visibility = android.view.View.VISIBLE
+                btnPickApps.visibility = android.view.View.VISIBLE
+                val mode = if (rbExclude.isChecked) "exclude" else "allow"
+                ConfigStore.setAppFilter(this, mode, null)
+            } else {
+                rgAppMode.visibility = android.view.View.GONE
+                btnPickApps.visibility = android.view.View.GONE
+                ConfigStore.setAppFilter(this, "off", null)
+            }
+        }
+
+        rgAppMode.setOnCheckedChangeListener { _, _ ->
+            if (switchAppFilter.isChecked) {
+                val mode = if (rbExclude.isChecked) "exclude" else "allow"
+                ConfigStore.setAppFilter(this, mode, null)
+            }
+        }
+
+        btnPickApps.setOnClickListener {
+            val mode = if (rbExclude.isChecked) "exclude" else "allow"
+            val intent = Intent(this, AppPickerActivity::class.java)
+                .putExtra("mode", mode)
+                .putStringArrayListExtra(
+                    "selected",
+                    ArrayList(ConfigStore.load(this)?.appList ?: emptyList())
+                )
+            startActivity(intent)
         }
 
         btnSave.setOnClickListener {
@@ -44,10 +92,13 @@ class SettingsActivity : AppCompatActivity() {
                 token = editToken.text?.toString()?.trim() ?: "",
                 listenAddr = editListenAddr.text?.toString()?.trim() ?: "127.0.0.1",
                 listenPort = editListenPort.text?.toString()?.toIntOrNull() ?: 30000,
-                global = switchGlobal.isChecked,
                 vpn = switchVpn.isChecked,
                 cards = old?.cards ?: listOf(ConfigStore.EntryCard("", 443)),
-                activeCard = old?.activeCard ?: 0
+                activeCard = old?.activeCard ?: 0,
+                appMode = if (switchAppFilter.isChecked) {
+                    if (rbExclude.isChecked) "exclude" else "allow"
+                } else "off",
+                appList = old?.appList ?: emptyList()
             )
             try {
                 ConfigStore.save(this, s)
@@ -57,5 +108,19 @@ class SettingsActivity : AppCompatActivity() {
                 Toast.makeText(this, "保存失败: ${e.message}", Toast.LENGTH_SHORT).show()
             }
         }
+    }
+
+    private fun refreshAppCount() {
+        val cfg = ConfigStore.load(this)
+        val on = cfg?.appMode != "off"
+        switchAppFilter.isChecked = on
+        rgAppMode.visibility = if (on) android.view.View.VISIBLE else android.view.View.GONE
+        btnPickApps.visibility = if (on) android.view.View.VISIBLE else android.view.View.GONE
+        btnPickApps.text = "选择应用（已选 ${cfg?.appList?.size ?: 0} 个）"
+    }
+
+    override fun onResume() {
+        super.onResume()
+        refreshAppCount()
     }
 }
