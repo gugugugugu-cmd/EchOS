@@ -1220,6 +1220,15 @@ func newPhysicalNetDialer(timeout time.Duration) *net.Dialer {
 			if len(servers) == 0 {
 				// 探测失败或物理网卡未确定，回退到默认行为，避免彻底断网。
 				logDNSDiag("[客户端][DNS-DIAG] 无物理 DNS 服务器，回退 Go 默认: %s", address)
+				// 平台钩子：Android 无 /etc/resolv.conf 时，Go 解析器回退地址
+				// 是 [::1]:53 死地址。dns_android.go 安装此钩子把它重定向到
+				// 公共 DNS；macOS 等其他平台钩子为 nil，行为不变。
+				if dnsRedirectForPlatform != nil {
+					if redirected := dnsRedirectForPlatform(address); redirected != "" {
+						logDNSDiag("[客户端][DNS-DIAG] 平台重定向 DNS: %s -> %s", address, redirected)
+						address = redirected
+					}
+				}
 				d := &net.Dialer{Timeout: timeout, Control: control}
 				return d.DialContext(ctx, network, address)
 			}

@@ -22,6 +22,13 @@ var (
 	tunMTU       = 9000
 )
 
+// dnsRedirectForPlatform 平台 DNS 重定向钩子：非空返回值会替换内核解析器
+// 回退路径上的 DNS 服务器地址（x-tunnel.go 的 newPhysicalNetDialer 里调用）。
+// Android 没有 /etc/resolv.conf，Go 解析器会退到 [::1]:53 死地址，
+// dns_android.go 在此安装实现把它重定向到公共 DNS；
+// macOS 等其他平台保持 nil，行为完全不变。
+var dnsRedirectForPlatform func(addr string) string
+
 // setUnicastIF 对应 Windows 的 IP_UNICAST_IF 绑定，非 Windows 平台无需绑定。
 func setUnicastIF(fd uintptr, ifaceIdx int, isIPv6 bool) error { return nil }
 

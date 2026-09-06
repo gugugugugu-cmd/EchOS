@@ -1,37 +1,58 @@
 //go:build android
 
-// Android 平台的 DNS 引导补丁。
+// Android 平台 DNS 引导补丁。
 //
-// Go 的纯 Go 解析器依赖 /etc/resolv.conf，但 Android 上没有这个文件
-// （Android 的 DNS 配置由 netd 管理，不暴露给普通进程）。CGO 又是禁用的
-// （CGO_ENABLED=0 交叉编译），没有 cgo 解析器兜底 —— 结果是所有默认域名
-// 解析都会失败，表现为：
-//   - DoH 服务器域名（dns.alidns.com）解析不了 → ECH 公钥查询失败
-//   - 未配置 -ip 时服务地址域名解析不了 → WebSocket 连不上
+// Android 没有 /etc/resolv.conf（DNS 配置由 netd 管理，不暴露给普通进程），
+// Go 的纯 Go 解析器读不到配置会退到 [::1]:53 —— 本机 53 端口没人监听，
+// 结果是所有默认域名解析全部失败：
+//   - DoH 服务器域名（dns.alidns.com）解析不了 → ECH 公钥查询死循环
+//   - 内核解析器回退路径拨 [::1]:53 → connection refused
 //
-// 修复方式：检测到 /etc/resolv.conf 不存在时，把 net.DefaultResolver
-// 换成走公共 DNS 的自定义解析器。只影响 android 平台构建，其他平台零改动。
-// 客户端给 -ip（优选IP）后服务连接不走这里，但 DoH 与分流解析仍受益。
+// 修复（仅在无 resolv.conf 时生效，其他平台零改动）：
+//  1. 替换全局默认解析器：直接向公共 DNS 发标准 UDP 查询；
+//  2. 安装 dnsRedirectForPlatform 钩子（定义于 tun_stub_other.go）：
+//     把内核内部解析器回退的 [::1]:53 死地址重定向到公共 DNS。
 package main
 
 import (
 	"context"
 	"net"
 	"os"
+	"strings"
 	"time"
 )
 
-const androidBootstrapDNS = "223.5.5.5:53" // 阿里公共 DNS，国内外可达
+// 阿里公共 DNS，国内外可达；Anycast，运营商网络普遍无劫持。
+const androidBootstrapDNS = "223.5.5.5:53"
+
+func androidBootstrapResolver() *net.Resolver {
+	dialer := &net.Dialer{Timeout: 4 * time.Second}
+	return &net.Resolver{
+		PreferGo: true,
+		Dial: func(ctx context.Context, network, _ string) (net.Conn, error) {
+			// 带版本的网络（udp4/tcp6 等）保持原样；裸 udp/tcp 强制 IPv4，
+			// 避免设备无 IPv6 时向公共 DNS 发 AAAA 传输路径卡住。
+			if !strings.Contains(network, "4") && !strings.Contains(network, "6") {
+				network = "udp4"
+			}
+			return dialer.DialContext(ctx, network, androidBootstrapDNS)
+		},
+	}
+}
 
 func init() {
 	if _, err := os.Stat("/etc/resolv.conf"); err == nil {
-		return // 有 resolv.conf 就不动默认行为
+		return // 有 resolv.conf（刷机环境等）就保持默认行为
 	}
-	dialer := &net.Dialer{Timeout: 5 * time.Second}
-	net.DefaultResolver = &net.Resolver{
-		PreferGo: true,
-		Dial: func(ctx context.Context, network, _ string) (net.Conn, error) {
-			return dialer.DialContext(ctx, network, androidBootstrapDNS)
-		},
+	net.DefaultResolver = androidBootstrapResolver()
+	dnsRedirectForPlatform = func(addr string) string {
+		host, _, err := net.SplitHostPort(addr)
+		if err != nil {
+			return ""
+		}
+		if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
+			return androidBootstrapDNS
+		}
+		return "" // 非回环地址（可能是 TUN 网关 DNS）不干预
 	}
 }
