@@ -11,9 +11,9 @@ android {
         applicationId "com.echos.app"
         minSdk 26
         targetSdk 34
-        // CI 通过 -PVERSION_NAME / -PVERSION_CODE 覆盖
-        versionName project.findProperty('VERSION_NAME') ?: "1.0.0"
-        versionCode (project.findProperty('VERSION_CODE') ?: "1").toInteger()
+        // CI 通过 -PVERSION_NAME / -PVERSION_CODE 覆盖（= 赋值写法，避免 Groovy 解析歧义）
+        versionName = (project.findProperty('VERSION_NAME') ?: "1.0.0").toString()
+        versionCode = (project.findProperty('VERSION_CODE') ?: "1").toString().toInteger()
         ndk {
             abiFilters += listOf("arm64-v8a")
         }
