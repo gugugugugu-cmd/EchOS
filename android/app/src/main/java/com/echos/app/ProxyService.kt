@@ -117,28 +117,23 @@ class ProxyService : Service() {
             log("[App] 配置为空，请先填写并保存")
             return
         }
-        if (cfg.addr.isBlank()) {
-            log("[App] 服务器地址未填写")
+        if (!cfg.isValid()) {
+            log("[App] 配置不完整（服务地址 / 线路端口 / 监听端口）")
             return
         }
-
         val bin = File(applicationInfo.nativeLibraryDir, "libxtun.so")
         if (!bin.exists()) {
             log("[App] 找不到内核二进制: ${bin.absolutePath}")
             return
         }
 
-        val args = mutableListOf(
-            bin.absolutePath,
-            "-l", "socks5://127.0.0.1:${cfg.port},http://127.0.0.1:${cfg.port + 1}",
-            "-f", "wss://${cfg.addr}",
-            "-n", "2",
-            "-ech", cfg.ech,
-            "-dns", cfg.doh,
-            "-default", if (cfg.global) "all" else "proxy",
-        )
-        if (cfg.ips.isNotBlank()) args += listOf("-ip", cfg.ips)
-        if (cfg.token.isNotBlank()) args += listOf("-token", cfg.token)
+        val args = mutableListOf(bin.absolutePath)
+        val kernelArgs = ConfigStore.buildArgs(cfg)
+        if (kernelArgs == null) {
+            log("[App] 内核参数生成失败（配置非法）")
+            return
+        }
+        args += kernelArgs
 
         log("[App] 启动内核: ${args.drop(1).joinToString(" ")}")
 

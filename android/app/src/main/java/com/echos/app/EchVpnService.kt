@@ -89,10 +89,14 @@ class EchVpnService : VpnService() {
 
     private fun startVpn() {
         val cfg = ConfigStore.load(this) ?: run {
-            ProxyService.log("[VPN] 配置为空")
+            ProxyService.log("[VPN] 配置为空，请先填写并保存")
             return
         }
-        val socksPort = cfg.port
+        if (!cfg.isValid()) {
+            ProxyService.log("[VPN] 配置不完整（服务地址 / 线路端口 / 监听端口）")
+            return
+        }
+        val socksPort = cfg.listenPort
 
         // TUN：全局路由 + mapdns（fake-IP DNS）
         val builder = Builder()
