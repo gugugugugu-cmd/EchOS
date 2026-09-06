@@ -76,12 +76,10 @@ class MainActivity : AppCompatActivity() {
 
         btnStart.setOnClickListener { onStartClicked() }
         btnStop.setOnClickListener {
-            startService(
-                Intent(this, EchVpnService::class.java).setAction(EchVpnService.ACTION_STOP)
-            )
-            startService(
-                Intent(this, ProxyService::class.java).setAction(ProxyService.ACTION_STOP)
-            )
+            // 直接停止两个 Service：确保 EchVpnService.onDestroy() 被调用，
+            // 由 onDestroy 关闭原始 TUN fd，系统 VPN 状态随之拆除。
+            stopService(Intent(this, EchVpnService::class.java))
+            stopService(Intent(this, ProxyService::class.java))
         }
 
         if (Build.VERSION.SDK_INT >= 33) {

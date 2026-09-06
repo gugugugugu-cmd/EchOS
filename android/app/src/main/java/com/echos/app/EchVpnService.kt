@@ -114,43 +114,41 @@ class EchVpnService : VpnService() {
             .addDnsServer(TUN_DNS)
             .addRoute("0.0.0.0", 0)
             .addRoute("::", 0)
-        try {
-            // 核心：自身包名的流量（内核 WSS/DoH、hev 的控制连接）绕过 TUN
-            builder.addDisallowedApplication(packageName)
-        } catch (e: Exception) {
-            ProxyService.log("[VPN] 排除自身失败: ${e.message}")
-        }
-        // 分应用代理
+        // 分应用代理：allowlist 与 denylist 不能同时使用。
         when (cfg.appMode) {
             "allow" -> {
-                cfg.appList.forEach { pkg ->
+                // allowlist 模式下自身包名天然不在允许列表，因此自动绕过 TUN
+                cfg.appList.filter { it != packageName }.forEach { pkg ->
                     try {
                         builder.addAllowedApplication(pkg)
                     } catch (e: Exception) {
                         ProxyService.log("[VPN] 跳过不存在的应用: $pkg")
                     }
                 }
-                ProxyService.log("[VPN] 分应用模式：仅 ${cfg.appList.size} 个应用走代理")
+                ProxyService.log("[VPN] 分应用模式：仅 ${cfg.appList.count { it != packageName }} 个应用走代理")
             }
             "exclude" -> {
-                cfg.appList.forEach { pkg ->
+                // denylist 模式：自身包名必须始终加入排除列表，防止内核 WSS 自环
+                try {
+                    builder.addDisallowedApplication(packageName)
+                } catch (e: Exception) {
+                    ProxyService.log("[VPN] 排除自身失败: ${e.message}")
+                }
+                cfg.appList.filter { it != packageName }.forEach { pkg ->
                     try {
                         builder.addDisallowedApplication(pkg)
                     } catch (e: Exception) {
                         ProxyService.log("[VPN] 跳过不存在的应用: $pkg")
                     }
                 }
-                ProxyService.log("[VPN] 排除模式：${cfg.appList.size} 个应用不走代理")
+                ProxyService.log("[VPN] 排除模式：${cfg.appList.count { it != packageName }} 个应用不走代理")
             }
             else -> {
-                if (cfg.appList.isNotEmpty()) {
-                    // 兼容：有列表但模式丢失，按排除处理
-                    cfg.appList.forEach { pkg ->
-                        try {
-                            builder.addDisallowedApplication(pkg)
-                        } catch (_: Exception) {
-                        }
-                    }
+                // 默认模式：仅本应用绕过 TUN，避免内核自身连接形成环路
+                try {
+                    builder.addDisallowedApplication(packageName)
+                } catch (e: Exception) {
+                    ProxyService.log("[VPN] 排除自身失败: ${e.message}")
                 }
             }
         }
@@ -196,19 +194,27 @@ class EchVpnService : VpnService() {
             return
         }
 
-        // hev 接管 fd：hev 不负责 close（TProxyStopService 只做转发清理），
-        // fd 归属保留在本服务，存入 tunFd，停止时显式关闭 —— 这正是
-        // 「停止后系统 VPN 状态残留」的根因：fd 开着，VpnService 接口就不会拆除。
-        val fd = pfd.detachFd()
-        tunFd = ParcelFileDescriptor.fromFd(fd)
+        // hev 使用副本 fd，原始 pfd 由 EchVpnService 持有并负责关闭。
+        // 这样 native 停止或异常时，不会留下系统 VPN 仍引用的 TUN fd。
+        val nativePfd = try {
+            ParcelFileDescriptor.dup(pfd.fileDescriptor)
+        } catch (e: Exception) {
+            ProxyService.log("[VPN] 复制 TUN fd 失败: ${e.message}")
+            try { pfd.close() } catch (_: Exception) {}
+            stopSelf()
+            return
+        }
+        val nativeFd = nativePfd.detachFd()
+        tunFd = pfd
         val ok = try {
-            tproxy.TProxyStartService(conf.absolutePath, fd)
+            tproxy.TProxyStartService(conf.absolutePath, nativeFd)
         } catch (e: Throwable) {
             ProxyService.log("[VPN] hev 启动异常: ${e.message}")
             false
         }
         if (!ok) {
             ProxyService.log("[VPN] hev 启动失败")
+            try { ParcelFileDescriptor.adoptFd(nativeFd).close() } catch (_: Exception) {}
             try { tunFd?.close() } catch (_: Exception) {}
             tunFd = null
             stopSelf()
