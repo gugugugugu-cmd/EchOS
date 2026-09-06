@@ -44,6 +44,18 @@ class ProxyService : Service() {
         }
 
         fun clearLogs() = synchronized(logBuffer) { logBuffer.clear() }
+
+        /** 供 ProxyService 与 EchVpnService 共用。 */
+        fun createChannelStatic(ctx: Context) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                val channel = NotificationChannel(
+                    CHANNEL_ID, ctx.getString(R.string.notif_channel),
+                    NotificationManager.IMPORTANCE_LOW
+                )
+                ctx.getSystemService(NotificationManager::class.java)
+                    .createNotificationChannel(channel)
+            }
+        }
     }
 
     private var process: Process? = null
@@ -52,7 +64,7 @@ class ProxyService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        createChannel()
+        createChannelStatic(this)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -73,16 +85,6 @@ class ProxyService : Service() {
     override fun onDestroy() {
         stopProxy()
         super.onDestroy()
-    }
-
-    private fun createChannel() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                CHANNEL_ID, getString(R.string.notif_channel),
-                NotificationManager.IMPORTANCE_LOW
-            )
-            getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
-        }
     }
 
     private fun buildNotification(): Notification {

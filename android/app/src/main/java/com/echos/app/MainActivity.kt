@@ -3,11 +3,13 @@ package com.echos.app
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.VpnService
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.widget.TextView
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
@@ -24,6 +26,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var editIps: TextInputEditText
     private lateinit var editToken: TextInputEditText
     private lateinit var switchGlobal: MaterialSwitch
+    private lateinit var switchVpn: MaterialSwitch
     private lateinit var btnStart: MaterialButton
     private lateinit var btnStop: MaterialButton
     private lateinit var statusView: TextView
@@ -31,6 +34,22 @@ class MainActivity : AppCompatActivity() {
 
     private val handler = Handler(Looper.getMainLooper())
     private var lastLogSize = -1
+
+    private val vpnPermissionLauncher =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            if (result.resultCode == RESULT_OK) {
+                startVpn()
+            } else {
+                ProxyService.log("[VPN] 授权被拒绝，仅本地代理模式运行")
+            }
+        }
+
+    private fun startVpn() {
+        ContextCompat.startForegroundService(
+            this, Intent(this, EchVpnService::class.java)
+                .setAction(EchVpnService.ACTION_START)
+        )
+    }
 
     private val tick = object : Runnable {
         override fun run() {
@@ -40,9 +59,15 @@ class MainActivity : AppCompatActivity() {
                 logView.text = lines.joinToString("\n")
             }
             val running = ProxyService.isRunning
-            statusView.text = if (running) getString(R.string.running) else getString(R.string.stopped)
-            btnStart.isEnabled = !running
-            btnStop.isEnabled = running
+            val vpn = EchVpnService.isVpnRunning
+            statusView.text = when {
+                running && vpn -> "运行中 · VPN 全局接管"
+                running -> "运行中 · 本地代理"
+                vpn -> "仅 VPN（内核未运行）"
+                else -> getString(R.string.stopped)
+            }
+            btnStart.isEnabled = !running && !vpn
+            btnStop.isEnabled = running || vpn
             handler.postDelayed(this, 1000)
         }
     }
@@ -58,6 +83,7 @@ class MainActivity : AppCompatActivity() {
         editIps = findViewById(R.id.editIps)
         editToken = findViewById(R.id.editToken)
         switchGlobal = findViewById(R.id.switchGlobal)
+        switchVpn = findViewById(R.id.switchVpn)
         btnStart = findViewById(R.id.btnStart)
         btnStop = findViewById(R.id.btnStop)
         statusView = findViewById(R.id.statusView)
@@ -81,9 +107,20 @@ class MainActivity : AppCompatActivity() {
                 this, Intent(this, ProxyService::class.java)
                     .setAction(ProxyService.ACTION_START)
             )
+            if (switchVpn.isChecked) {
+                val prepare = VpnService.prepare(this)
+                if (prepare != null) {
+                    vpnPermissionLauncher.launch(prepare)
+                } else {
+                    startVpn()
+                }
+            }
         }
 
         btnStop.setOnClickListener {
+            startService(
+                Intent(this, EchVpnService::class.java).setAction(EchVpnService.ACTION_STOP)
+            )
             startService(
                 Intent(this, ProxyService::class.java).setAction(ProxyService.ACTION_STOP)
             )
@@ -113,6 +150,7 @@ class MainActivity : AppCompatActivity() {
         editIps.setText(s.ips)
         editToken.setText(s.token)
         switchGlobal.isChecked = s.global
+        switchVpn.isChecked = s.vpn
     }
 
     private fun current(): ConfigStore.Server = ConfigStore.Server(
@@ -123,6 +161,7 @@ class MainActivity : AppCompatActivity() {
         ips = editIps.text?.toString()?.trim() ?: "",
         token = editToken.text?.toString()?.trim() ?: "",
         global = switchGlobal.isChecked,
+        vpn = switchVpn.isChecked,
     )
 
     private fun saveConfig() {

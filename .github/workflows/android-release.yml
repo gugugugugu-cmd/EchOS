@@ -70,6 +70,23 @@ jobs:
             -o ../android/app/src/main/jniLibs/arm64-v8a/libxtun.so .
           ls -la ../android/app/src/main/jniLibs/arm64-v8a/
 
+      - name: Build hev-socks5-tunnel (VPN JNI)
+        run: |
+          set -e
+          git clone --depth 1 --branch 2.17.1 https://github.com/heiher/hev-socks5-tunnel
+          cd hev-socks5-tunnel
+          git submodule update --init --depth 1
+          NDK_DIR=$(ls -d ${ANDROID_HOME:-/usr/local/lib/android/sdk}/ndk/* 2>/dev/null | tail -1)
+          echo "NDK: $NDK_DIR"
+          "$NDK_DIR/ndk-build" -j4 \
+            NDK_PROJECT_PATH="$PWD" \
+            APP_BUILD_SCRIPT="$PWD/Android.mk" \
+            NDK_APPLICATION_MK="$PWD/Application.mk" \
+            APP_ABI=arm64-v8a
+          cp libs/arm64-v8a/libhev-socks5-tunnel.so \
+             ../android/app/src/main/jniLibs/arm64-v8a/
+          ls -la ../android/app/src/main/jniLibs/arm64-v8a/
+
       - name: Generate debug signing key
         run: |
           KS=android/app/release.keystore

@@ -118,6 +118,13 @@
             android:layout_marginTop="16dp"
             android:text="@string/mode_global" />
 
+        <com.google.android.material.materialswitch.MaterialSwitch
+            android:id="@+id/switchVpn"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="VPN 全局接管（推荐，无需逐个应用配置）" />
+
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btnStart"
             android:layout_width="match_parent"

@@ -15,6 +15,7 @@ object ConfigStore {
         val ips: String,       // 优选 IP，逗号分隔
         val token: String,     // 身份令牌
         val global: Boolean,   // true=全局 false=规则分流
+        val vpn: Boolean,      // VPN 全局接管
     )
 
     fun load(ctx: Context): Server? {
@@ -31,6 +32,7 @@ object ConfigStore {
                     ips = o.optString("ips", ""),
                     token = o.optString("token", ""),
                     global = o.optBoolean("global", true),
+                    vpn = o.optBoolean("vpn", true),
                 )
             }
         } catch (e: Exception) {
@@ -47,6 +49,7 @@ object ConfigStore {
         o.put("ips", s.ips)
         o.put("token", s.token)
         o.put("global", s.global)
+        o.put("vpn", s.vpn)
         ctx.openFileOutput(FILE, Context.MODE_PRIVATE).use { out ->
             out.write(o.toString().toByteArray())
         }
