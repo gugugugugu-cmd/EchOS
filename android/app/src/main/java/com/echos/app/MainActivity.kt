@@ -3,7 +3,6 @@ package com.echos.app
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.content.res.ColorStateList
 import android.graphics.Color
 import android.net.VpnService
 import android.os.Build
@@ -19,6 +18,7 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.card.MaterialCardView
@@ -213,9 +213,8 @@ class MainActivity : AppCompatActivity() {
                 .findViewById<MaterialCardView>(R.id.cardRoot)
             val active = i == activeCard
             card.strokeWidth = if (active) 3 else 1
-            card.strokeColor = ColorStateList.valueOf(
+            card.strokeColor =
                 if (active) Color.parseColor("#0B57D0") else Color.parseColor("#E0E0E0")
-            )
             card.findViewById<TextView>(R.id.cardActive).visibility =
                 if (active) View.VISIBLE else View.GONE
         }
