@@ -6,7 +6,7 @@ package hev.htproxy
  * 类名/包名与上游 hev-jni.c 的默认 PKGNAME/CLSNAME（hev/htproxy/TProxyService）
  * 严格对应，方法名即 native 注册名，不能改。
  *
- * 注意：TProxyStartService 会接管 fd（内部会 close），调用方传入前应 detachFd()。
+ * fd 所有权由 VpnService 保留；native 只使用 getFd()，停止时由 Service 显式 close。
  */
 class TProxyService {
     companion object {

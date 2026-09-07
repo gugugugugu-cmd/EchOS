@@ -151,24 +151,27 @@ class MainActivity : AppCompatActivity() {
             )
         }
         ProxyService.clearLogs()
-        ContextCompat.startForegroundService(
-            this, Intent(this, ProxyService::class.java)
-                .setAction(ProxyService.ACTION_START)
-        )
         if (cfg.vpn) {
+            // VPN 模式只启动 EchVpnService；它内部负责启动内核并持有唯一通知。
             val prepare = VpnService.prepare(this)
             if (prepare != null) {
                 vpnPermissionLauncher.launch(prepare)
             } else {
                 startVpn()
             }
+        } else {
+            // 本地代理模式只启动 ProxyService。
+            ContextCompat.startForegroundService(
+                this, Intent(this, ProxyService::class.java)
+                    .setAction(ProxyService.ACTION_START)
+            )
         }
     }
 
     private fun startVpn() {
-        // App 当前在前台，直接启动 VpnService；唯一前台通知由 ProxyService 持有。
-        startService(
-            Intent(this, EchVpnService::class.java)
+        // VPN 模式只有 EchVpnService 一个前台 Service/一条通知。
+        ContextCompat.startForegroundService(
+            this, Intent(this, EchVpnService::class.java)
                 .setAction(EchVpnService.ACTION_START)
         )
     }

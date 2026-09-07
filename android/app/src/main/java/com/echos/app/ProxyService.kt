@@ -12,14 +12,8 @@ import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
-import java.io.BufferedReader
-import java.io.File
-import java.io.InputStreamReader
 
-/**
- * 前台服务：拉起 Go 内核（libxtun.so，即 x-tunnel 的 Android 交叉编译产物），
- * 转发日志，退出时回收进程。与 macOS 版「SwiftUI 壳 + x-tunnel 子进程」同构。
- */
+/** 本地代理模式的唯一前台 Service；VPN 模式不会启动本服务。 */
 class ProxyService : Service() {
 
     companion object {
@@ -30,8 +24,11 @@ class ProxyService : Service() {
         const val MAX_LOG_LINES = 400
 
         @Volatile
-        var isRunning = false
+        var isServiceRunning = false
             private set
+
+        val isRunning: Boolean
+            get() = KernelRunner.isRunning
 
         private val logBuffer = ArrayDeque<String>()
 
@@ -46,9 +43,18 @@ class ProxyService : Service() {
 
         fun clearLogs() = synchronized(logBuffer) { logBuffer.clear() }
 
-        /** 唯一的前台通知：VPN/本地代理共用通知 ID。 */
-        fun buildUnifiedNotification(ctx: Context): Notification {
-            val vpn = EchVpnService.isVpnRunning
+        fun createChannelStatic(ctx: Context) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                val channel = NotificationChannel(
+                    CHANNEL_ID, ctx.getString(R.string.notif_channel),
+                    NotificationManager.IMPORTANCE_LOW
+                )
+                ctx.getSystemService(NotificationManager::class.java)
+                    .createNotificationChannel(channel)
+            }
+        }
+
+        fun buildNotification(ctx: Context, vpn: Boolean): Notification {
             val pi = PendingIntent.getActivity(
                 ctx, 0, Intent(ctx, MainActivity::class.java),
                 PendingIntent.FLAG_IMMUTABLE
@@ -62,39 +68,13 @@ class ProxyService : Service() {
                 .build()
         }
 
-        /** 根据当前模式刷新唯一前台通知。 */
-        fun refreshNotification(ctx: Context) {
-            if (!isRunning) return
-            val nm = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            nm.notify(NOTIF_ID, buildUnifiedNotification(ctx))
-        }
-
-        /** 重启内核（配置变更后调用）。 */
         fun restart(ctx: Context) {
-            ctx.startService(
-                Intent(ctx, ProxyService::class.java).setAction(ACTION_STOP)
-            )
+            KernelRunner.stop()
             android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-                ContextCompat.startForegroundService(
-                    ctx, Intent(ctx, ProxyService::class.java).setAction(ACTION_START)
-                )
-            }, 600)
-        }
-
-        /** 供 ProxyService 与 EchVpnService 共用。 */
-        fun createChannelStatic(ctx: Context) {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                val channel = NotificationChannel(
-                    CHANNEL_ID, ctx.getString(R.string.notif_channel),
-                    NotificationManager.IMPORTANCE_LOW
-                )
-                ctx.getSystemService(NotificationManager::class.java)
-                    .createNotificationChannel(channel)
-            }
+                KernelRunner.start(ctx.applicationContext)
+            }, 500)
         }
     }
-
-    private var process: Process? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -104,22 +84,40 @@ class ProxyService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        when (intent?.action) {
-            ACTION_STOP -> {
-                stopProxy()
-                stopSelf()
-                return START_NOT_STICKY
-            }
-            else -> {
-                if (!isRunning) startProxy()
-                startForegroundCompat()
-            }
+        if (intent?.action == ACTION_STOP) {
+            shutdown()
+            return START_NOT_STICKY
         }
-        return START_STICKY
+        isServiceRunning = true
+        startForegroundCompat()
+        if (!KernelRunner.start(this)) shutdown()
+        return START_NOT_STICKY
     }
 
     override fun onDestroy() {
-        stopProxy()
+        KernelRunner.stop()
+        isServiceRunning = false
+        removeForeground()
+        super.onDestroy()
+    }
+
+    private fun startForegroundCompat() {
+        val n = buildNotification(this, false)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            startForeground(NOTIF_ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+        } else {
+            startForeground(NOTIF_ID, n)
+        }
+    }
+
+    private fun shutdown() {
+        KernelRunner.stop()
+        isServiceRunning = false
+        removeForeground()
+        stopSelf()
+    }
+
+    private fun removeForeground() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
             stopForeground(STOP_FOREGROUND_REMOVE)
         } else {
@@ -127,90 +125,5 @@ class ProxyService : Service() {
             stopForeground(true)
         }
         getSystemService(NotificationManager::class.java).cancel(NOTIF_ID)
-        super.onDestroy()
-    }
-
-    private fun buildNotification(): Notification = buildUnifiedNotification(this)
-
-    private fun startForegroundCompat() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(
-                NOTIF_ID, buildNotification(),
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
-            )
-        } else {
-            startForeground(NOTIF_ID, buildNotification())
-        }
-    }
-
-    private fun startProxy() {
-        val cfg = ConfigStore.load(this) ?: run {
-            log("[App] 配置为空，请先填写并保存")
-            return
-        }
-        if (!cfg.isValid()) {
-            log("[App] 配置不完整（服务地址 / 线路端口 / 监听端口）")
-            return
-        }
-        val bin = File(applicationInfo.nativeLibraryDir, "libxtun.so")
-        if (!bin.exists()) {
-            log("[App] 找不到内核二进制: ${bin.absolutePath}")
-            return
-        }
-
-        val args = mutableListOf(bin.absolutePath)
-        val kernelArgs = ConfigStore.buildArgs(cfg)
-        if (kernelArgs == null) {
-            log("[App] 内核参数生成失败（配置非法）")
-            return
-        }
-        args += kernelArgs
-
-        log("[App] 启动内核: ${args.drop(1).joinToString(" ")}")
-
-        try {
-            val pb = ProcessBuilder(args).redirectErrorStream(true)
-            pb.environment()["HOME"] = filesDir.absolutePath
-            val proc = pb.start()
-            process = proc
-            isRunning = true
-
-            Thread {
-                try {
-                    BufferedReader(InputStreamReader(proc.inputStream)).useLines { lines ->
-                        lines.forEach { log(it) }
-                    }
-                } catch (_: Exception) {
-                }
-                val code = proc.waitFor()
-                isRunning = false
-                log("[App] 内核已退出 (exit=$code)")
-                updateNotification()
-            }.start()
-        } catch (e: Exception) {
-            isRunning = false
-            log("[App] 启动失败: ${e.message}")
-        }
-    }
-
-    private fun stopProxy() {
-        val p = process ?: return
-        process = null
-        try {
-            p.destroy()
-            if (!p.waitFor(3, java.util.concurrent.TimeUnit.SECONDS)) {
-                p.destroyForcibly()
-            }
-        } catch (_: Exception) {
-        }
-        if (isRunning) {
-            isRunning = false
-            log("[App] 代理已停止")
-        }
-    }
-
-    private fun updateNotification() {
-        val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        nm.notify(NOTIF_ID, buildNotification())
     }
 }
