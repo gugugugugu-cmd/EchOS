@@ -1,6 +1,7 @@
 package com.echos.app
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
@@ -9,7 +10,10 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.view.MotionEvent
 import android.view.View
+import android.view.ViewGroup
+import android.view.ViewConfiguration
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
@@ -19,6 +23,7 @@ import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.card.MaterialCardView
+import kotlin.math.abs
 
 class MainActivity : AppCompatActivity() {
 
@@ -28,6 +33,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var statusView: TextView
 
     private val handler = Handler(Looper.getMainLooper())
+    private var openSwipeCard: View? = null
+    private val touchSlop by lazy { ViewConfiguration.get(this).scaledTouchSlop }
 
     private val vpnPermissionLauncher =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
@@ -76,7 +83,7 @@ class MainActivity : AppCompatActivity() {
 
         btnStart.setOnClickListener { onStartClicked() }
         btnStop.setOnClickListener {
-            // 先给 VPN 服务一个明确的清理动作，再 stopService 兜底关闭 TUN fd。
+            // 先给 VPN 服务明确的清理动作，再 stopService 兜底关闭 TUN fd。
             EchVpnService.stop(this)
             stopService(Intent(this, ProxyService::class.java))
             getSystemService(android.app.NotificationManager::class.java)
@@ -104,24 +111,136 @@ class MainActivity : AppCompatActivity() {
     // ==================== 线路卡片 ====================
 
     private fun rebuildCards() {
+        openSwipeCard = null
         cardsContainer.removeAllViews()
         val cfg = ConfigStore.load(this) ?: ConfigStore.default()
-        cfg.cards.forEachIndexed { i, card ->
-            val v = layoutInflater.inflate(R.layout.item_entry_card, cardsContainer, false)
-            val cardRoot = v.findViewById<MaterialCardView>(R.id.cardRoot)
-            val rowText = v.findViewById<TextView>(R.id.cardText)
-            val activeTag = v.findViewById<TextView>(R.id.cardActive)
+        cfg.cards.forEachIndexed { i, card -> addCardView(i, card, cfg.activeCard) }
+    }
 
-            rowText.text = card.display()
-            val active = i == cfg.activeCard
-            cardRoot.strokeWidth = if (active) 3 else 1
-            cardRoot.strokeColor =
-                if (active) Color.parseColor("#0B57D0") else Color.parseColor("#E0E0E0")
-            activeTag.visibility = if (active) View.VISIBLE else View.GONE
+    @SuppressLint("ClickableViewAccessibility")
+    private fun addCardView(index: Int, card: ConfigStore.EntryCard, activeIndex: Int) {
+        val v = layoutInflater.inflate(R.layout.item_entry_card, cardsContainer, false)
+        val cardRoot = v.findViewById<MaterialCardView>(R.id.cardRoot)
+        val rowText = v.findViewById<TextView>(R.id.cardText)
+        val activeTag = v.findViewById<TextView>(R.id.cardActive)
+        val btnEdit = v.findViewById<TextView>(R.id.btnEdit)
+        val btnDelete = v.findViewById<TextView>(R.id.btnDelete)
+        val actionBar = v.findViewById<LinearLayout>(R.id.actionBar)
 
-            cardRoot.setOnClickListener { openCardEditor(i) }
-            cardsContainer.addView(v)
+        rowText.text = card.display()
+        val active = index == activeIndex
+        cardRoot.strokeWidth = if (active) 3 else 1
+        cardRoot.strokeColor =
+            if (active) Color.parseColor("#0B57D0") else Color.parseColor("#E0E0E0")
+        activeTag.visibility = if (active) View.VISIBLE else View.GONE
+
+        fun indexOfCard() = cardsContainer.indexOfChild(v)
+
+        fun closeAllSwipes() {
+            for (i in 0 until cardsContainer.childCount) {
+                cardsContainer.getChildAt(i)
+                    .findViewById<MaterialCardView>(R.id.cardRoot)
+                    .animate().translationX(0f).setDuration(140).start()
+            }
+            openSwipeCard = null
         }
+
+        btnEdit.setOnClickListener {
+            closeAllSwipes()
+            openCardEditor(indexOfCard())
+        }
+        btnDelete.setOnClickListener {
+            closeAllSwipes()
+            if ((ConfigStore.load(this)?.cards?.size ?: 0) <= 1) {
+                Toast.makeText(this, "至少保留一个线路卡片", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+            ConfigStore.removeCard(indexOfCard())
+            rebuildCards()
+        }
+
+        // 点卡片本体 = 切换为使用中线路
+        cardRoot.setOnClickListener {
+            if (openSwipeCard != null) {
+                closeAllSwipes()
+                return@setOnClickListener
+            }
+            val i = indexOfCard()
+            ConfigStore.setActive(this, i)
+            rebuildCards()
+            if (ProxyService.isRunning) ProxyService.restart(this)
+        }
+
+        // 左滑 ~1/4 宽度露出「编辑 / 删除」
+        var downX = 0f
+        var downY = 0f
+        var horizontal = false
+        var swiping = false
+        var reveal = 0
+
+        cardRoot.setOnTouchListener { vw, ev ->
+            when (ev.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    downX = ev.x; downY = ev.y
+                    horizontal = false; swiping = false
+                    reveal = btnEdit.width + btnDelete.width
+                    true
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    val dx = ev.x - downX
+                    val dy = ev.y - downY
+                    if (!horizontal && !swiping) {
+                        if (abs(dx) > touchSlop && abs(dx) > abs(dy)) {
+                            horizontal = true
+                            swiping = true
+                            (vw.parent as? ViewGroup)?.requestDisallowInterceptTouchEvent(true)
+                            // 同时只允许一张卡片处于展开状态
+                            if (openSwipeCard != null && openSwipeCard !== vw) {
+                                openSwipeCard?.findViewById<MaterialCardView>(R.id.cardRoot)
+                                    ?.animate()?.translationX(0f)?.setDuration(120)?.start()
+                                openSwipeCard = null
+                            }
+                        } else if (abs(dy) > touchSlop) {
+                            return@setOnTouchListener false // 交给外层 ScrollView
+                        }
+                    }
+                    if (swiping) {
+                        val base = if (openSwipeCard === vw) -reveal.toFloat() else 0f
+                        vw.translationX = (base + dx).coerceIn(-reveal.toFloat(), 0f)
+                        true
+                    } else false
+                }
+                MotionEvent.ACTION_UP -> {
+                    if (swiping) {
+                        swiping = false
+                        if (vw.translationX < -reveal / 2f) {
+                            openSwipeCard = vw
+                            vw.animate().translationX(-reveal.toFloat()).setDuration(140).start()
+                        } else {
+                            vw.animate().translationX(0f).setDuration(140).start()
+                            if (openSwipeCard === vw) openSwipeCard = null
+                        }
+                        true
+                    } else if (!horizontal) {
+                        vw.performClick()
+                        true
+                    } else false
+                }
+                MotionEvent.ACTION_CANCEL -> {
+                    val wasOpen = openSwipeCard === vw
+                    val target = if (wasOpen || vw.translationX < -reveal / 2f) {
+                        -reveal.toFloat()
+                    } else 0f
+                    vw.animate().translationX(target).setDuration(120).start()
+                    openSwipeCard = if (target < 0f) vw else null
+                    swiping = false; horizontal = false
+                    true
+                }
+                else -> false
+            }
+        }
+
+        cardsContainer.addView(v)
     }
 
     private fun openCardEditor(index: Int) {
@@ -152,7 +271,6 @@ class MainActivity : AppCompatActivity() {
         }
         ProxyService.clearLogs()
         if (cfg.vpn) {
-            // VPN 模式只启动 EchVpnService；它内部负责启动内核并持有唯一通知。
             val prepare = VpnService.prepare(this)
             if (prepare != null) {
                 vpnPermissionLauncher.launch(prepare)
@@ -160,7 +278,6 @@ class MainActivity : AppCompatActivity() {
                 startVpn()
             }
         } else {
-            // 本地代理模式只启动 ProxyService。
             ContextCompat.startForegroundService(
                 this, Intent(this, ProxyService::class.java)
                     .setAction(ProxyService.ACTION_START)
@@ -169,7 +286,6 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun startVpn() {
-        // VPN 模式只有 EchVpnService 一个前台 Service/一条通知。
         ContextCompat.startForegroundService(
             this, Intent(this, EchVpnService::class.java)
                 .setAction(EchVpnService.ACTION_START)
