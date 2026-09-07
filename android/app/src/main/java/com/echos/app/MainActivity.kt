@@ -155,7 +155,7 @@ class MainActivity : AppCompatActivity() {
                 Toast.makeText(this, "至少保留一个线路卡片", Toast.LENGTH_SHORT).show()
                 return@setOnClickListener
             }
-            ConfigStore.removeCard(indexOfCard())
+            ConfigStore.removeCard(this@MainActivity, indexOfCard())
             rebuildCards()
         }
 
@@ -166,9 +166,9 @@ class MainActivity : AppCompatActivity() {
                 return@setOnClickListener
             }
             val i = indexOfCard()
-            ConfigStore.setActive(this, i)
+            ConfigStore.setActive(this@MainActivity, i)
             rebuildCards()
-            if (ProxyService.isRunning) ProxyService.restart(this)
+            if (ProxyService.isRunning) ProxyService.restart(this@MainActivity)
         }
 
         // 左滑 ~1/4 宽度露出「编辑 / 删除」
