@@ -80,34 +80,32 @@
         </com.google.android.material.textfield.TextInputLayout>
 
         <com.google.android.material.textfield.TextInputLayout
-            style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
+            style="@style/Widget.Material3.TextInputLayout.ExposedDropdownMenu"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="12dp"
-            android:hint="ECH DOH 服务器">
+            android:hint="ECH DOH 服务器（选预设或手动输入）">
 
-            <com.google.android.material.textfield.TextInputEditText
-                android:id="@+id/editDoh"
+            <AutoCompleteTextView
+                android:id="@+id/spinnerDoh"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:inputType="textUri"
-                android:text="https://dns.alidns.com/dns-query"
                 android:singleLine="true" />
         </com.google.android.material.textfield.TextInputLayout>
 
         <com.google.android.material.textfield.TextInputLayout
-            style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
+            style="@style/Widget.Material3.TextInputLayout.ExposedDropdownMenu"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="12dp"
-            android:hint="ECH 公钥查询域名">
+            android:hint="ECH 公钥查询域名（选预设或手动输入）">
 
-            <com.google.android.material.textfield.TextInputEditText
-                android:id="@+id/editEch"
+            <AutoCompleteTextView
+                android:id="@+id/spinnerEch"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:inputType="textUri"
-                android:text="cloudflare-ech.com"
                 android:singleLine="true" />
         </com.google.android.material.textfield.TextInputLayout>
 

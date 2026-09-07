@@ -2,6 +2,9 @@ package com.echos.app
 
 import android.content.Intent
 import android.os.Bundle
+import android.view.View
+import android.widget.ArrayAdapter
+import android.widget.AutoCompleteTextView
 import android.widget.RadioButton
 import android.widget.RadioGroup
 import android.widget.Toast
@@ -28,8 +31,8 @@ class SettingsActivity : AppCompatActivity() {
         val editToken = findViewById<TextInputEditText>(R.id.editToken)
         val editListenAddr = findViewById<TextInputEditText>(R.id.editListenAddr)
         val editListenPort = findViewById<TextInputEditText>(R.id.editListenPort)
-        val editEch = findViewById<TextInputEditText>(R.id.editEch)
-        val editDoh = findViewById<TextInputEditText>(R.id.editDoh)
+        val spinnerEch = findViewById<AutoCompleteTextView>(R.id.spinnerEch)
+        val spinnerDoh = findViewById<AutoCompleteTextView>(R.id.spinnerDoh)
         switchVpn = findViewById(R.id.switchVpn)
         switchAppFilter = findViewById(R.id.switchAppFilter)
         rgAppMode = findViewById(R.id.rgAppMode)
@@ -38,18 +41,23 @@ class SettingsActivity : AppCompatActivity() {
         btnPickApps = findViewById(R.id.btnPickApps)
         val btnSave = findViewById<MaterialButton>(R.id.btnSave)
 
+        setupPresetDropdown(spinnerEch, R.array.ech_domain_presets)
+        setupPresetDropdown(spinnerDoh, R.array.doh_presets)
+
         ConfigStore.load(this)?.let { cfg ->
             editDomain.setText(cfg.domain)
             editToken.setText(cfg.token)
             editListenAddr.setText(cfg.listenAddr)
             editListenPort.setText(cfg.listenPort.toString())
-            editEch.setText(cfg.ech)
-            editDoh.setText(cfg.doh)
+            spinnerEch.setText(cfg.ech, false)
+            spinnerDoh.setText(cfg.doh, false)
             switchVpn.isChecked = cfg.vpn
             switchAppFilter.isChecked = cfg.appMode != "off"
             if (cfg.appMode == "exclude") rbExclude.isChecked = true else rbAllow.isChecked = true
             refreshAppCount()
         }
+        if (spinnerEch.text.isNullOrBlank()) spinnerEch.setText("cloudflare-ech.com", false)
+        if (spinnerDoh.text.isNullOrBlank()) spinnerDoh.setText("dns.alidns.com/dns-query", false)
 
         // 分应用开关/模式的改动立即持久化，方便跳转选择页时带上状态
         switchAppFilter.setOnCheckedChangeListener { _, checked ->
@@ -87,8 +95,8 @@ class SettingsActivity : AppCompatActivity() {
             val old = ConfigStore.load(this)
             val s = ConfigStore.Server(
                 domain = editDomain.text?.toString()?.trim() ?: "",
-                ech = editEch.text?.toString()?.trim() ?: "cloudflare-ech.com",
-                doh = editDoh.text?.toString()?.trim() ?: "https://dns.alidns.com/dns-query",
+                ech = spinnerEch.text?.toString()?.trim() ?: "cloudflare-ech.com",
+                doh = spinnerDoh.text?.toString()?.trim() ?: "dns.alidns.com/dns-query",
                 token = editToken.text?.toString()?.trim() ?: "",
                 listenAddr = editListenAddr.text?.toString()?.trim() ?: "127.0.0.1",
                 listenPort = editListenPort.text?.toString()?.toIntOrNull() ?: 30000,
@@ -117,6 +125,26 @@ class SettingsActivity : AppCompatActivity() {
         rgAppMode.visibility = if (on) android.view.View.VISIBLE else android.view.View.GONE
         btnPickApps.visibility = if (on) android.view.View.VISIBLE else android.view.View.GONE
         btnPickApps.text = "选择应用（已选 ${cfg?.appList?.size ?: 0} 个）"
+    }
+
+    /**
+     * 预设下拉：条目显示「标签」，选中后把 value 填入输入框；
+     * 输入框仍可自由编辑（与 macOS 版 customSentinel 行为一致）。
+     */
+    private fun setupPresetDropdown(view: AutoCompleteTextView, arrayRes: Int) {
+        val presets = resources.getStringArray(arrayRes)
+            .map {
+                val (label, value) = it.split("|", limit = 2).let { p -> p[0] to p.getOrElse(1) { p[0] } }
+                label to value
+            }
+        view.setAdapter(
+            ArrayAdapter(
+                this, android.R.layout.simple_list_item_1, presets.map { it.first }
+            )
+        )
+        view.setOnItemClickListener { _, _, pos, _ ->
+            view.setText(presets[pos].second, false)
+        }
     }
 
     override fun onResume() {

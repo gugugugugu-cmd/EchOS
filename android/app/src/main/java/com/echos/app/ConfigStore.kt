@@ -171,13 +171,31 @@ object ConfigStore {
             "-f", "wss://${s.domain}:${card.port}",
             "-n", "2",
             "-ech", s.ech,
-            "-dns", s.doh,
+            // 与 macOS 版 normalizedDoH 一致：带路径的补 https://，udp:// 剥壳
+            "-dns", normalizedDoh(s.doh),
             // Android 版未打包 geo 数据，规则分流无意义，恒为全局
             "-default", "all"
         )
         if (card.ips.isNotBlank()) args += listOf("-ip", card.ips)
         if (s.token.isNotBlank()) args += listOf("-token", s.token)
         return args
+    }
+
+    /**
+     * 把界面上的 DoH 写法归一化为内核可识别的形式：
+     * - 已带 http(s):// 原样传（内核靠前缀判定走 DoH）
+     * - udp:// 剥掉 scheme（那是界面标注，内核不认），当 UDP DNS 传
+     * - 带路径的（如 dns.alidns.com/dns-query）补 https://
+     * - 纯主机名/IP（如 223.5.5.5）当 UDP DNS 原样传
+     */
+    fun normalizedDoh(raw: String): String {
+        val s = raw.trim()
+        if (s.isEmpty()) return s
+        val lower = s.lowercase()
+        if (lower.startsWith("http://") || lower.startsWith("https://")) return s
+        if (lower.startsWith("udp://")) return s.drop(6)
+        val pathStart = s.indexOf('/')
+        return if (pathStart > 0) "https://$s" else s
     }
 
     /** 从剪贴板文本解析线路列表（自动识别 IPv4/域名:端口，忽略统计与来源区块）。 */
