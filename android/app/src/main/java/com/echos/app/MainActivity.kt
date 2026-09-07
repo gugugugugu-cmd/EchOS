@@ -74,6 +74,7 @@ class MainActivity : AppCompatActivity() {
             val idx = ConfigStore.addCard(this, ConfigStore.EntryCard("", 443))
             openCardEditor(idx)
         }
+        findViewById<View>(R.id.btnImport).setOnClickListener { importFromClipboard() }
         findViewById<View>(R.id.btnLogs).setOnClickListener {
             startActivity(Intent(this, LogActivity::class.java))
         }
@@ -247,6 +248,54 @@ class MainActivity : AppCompatActivity() {
         startActivity(
             Intent(this, CardEditActivity::class.java).putExtra("index", index)
         )
+    }
+
+    // ==================== 剪贴板导入 ====================
+
+    private fun importFromClipboard() {
+        val cm = getSystemService(android.content.ClipboardManager::class.java)
+        val text = try {
+            cm.primaryClip?.getItemAt(0)?.coerceToText(this)?.toString() ?: ""
+        } catch (_: Exception) {
+            ""
+        }
+        if (text.isBlank()) {
+            Toast.makeText(this, "剪贴板为空", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val parsed = ConfigStore.parseProxyList(text)
+        if (parsed.isEmpty()) {
+            Toast.makeText(this, "未识别到线路（需要 IP:端口 格式）", Toast.LENGTH_LONG).show()
+            return
+        }
+        val old = ConfigStore.load(this) ?: ConfigStore.default()
+        val existing = old.cards.map { "${it.ips}:${it.port}" }.toSet()
+        val fresh = parsed.filter { "${it.ips}:${it.port}" !in existing }
+
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle("识别到 ${parsed.size} 条线路")
+            .setMessage(
+                "其中新线路 ${fresh.size} 条，与现有重复 ${parsed.size - fresh.size} 条。\n\n" +
+                    "「追加」保留现有线路并加入新的；「替换全部」清空后导入。"
+            )
+            .setPositiveButton("追加") { _, _ ->
+                val merged = old.cards + fresh
+                ConfigStore.save(
+                    this, old.copy(
+                        cards = merged,
+                        activeCard = old.activeCard.coerceIn(0, merged.size - 1)
+                    )
+                )
+                rebuildCards()
+                Toast.makeText(this, "已追加 ${fresh.size} 条线路", Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton("替换全部") { _, _ ->
+                ConfigStore.save(this, old.copy(cards = parsed, activeCard = 0))
+                rebuildCards()
+                Toast.makeText(this, "已导入 ${parsed.size} 条线路", Toast.LENGTH_SHORT).show()
+            }
+            .setNeutralButton("取消", null)
+            .show()
     }
 
     // ==================== 启动 / 停止 ====================

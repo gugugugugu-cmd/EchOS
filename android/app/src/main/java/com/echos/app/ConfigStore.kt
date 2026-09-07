@@ -180,6 +180,26 @@ object ConfigStore {
         return args
     }
 
+    /** 从剪贴板文本解析线路列表（自动识别 IPv4/域名:端口，忽略统计与来源区块）。 */
+    fun parseProxyList(text: String): List<EntryCard> {
+        val out = mutableListOf<EntryCard>()
+        val seen = mutableSetOf<String>()
+        val ipRe = Regex("""(\d{1,3}(?:\.\d{1,3}){3}):(\d{1,5})""")
+        val domainRe = Regex(
+            """([a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?)+):(\d{1,5})"""
+        )
+        for (raw in text.lineSequence()) {
+            val line = raw.trim().trimStart('·', '.', '-').trim()
+            val m = ipRe.find(line) ?: domainRe.find(line) ?: continue
+            val host = m.groupValues[1]
+            val port = m.groupValues[2].toIntOrNull() ?: continue
+            if (port !in 1..65535) continue
+            val key = "$host:$port"
+            if (seen.add(key)) out.add(EntryCard(host, port))
+        }
+        return out
+    }
+
     fun default(): Server = Server(
         domain = "", ech = "cloudflare-ech.com",
         doh = "https://dns.alidns.com/dns-query", token = "",
