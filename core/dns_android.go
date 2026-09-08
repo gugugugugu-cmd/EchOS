@@ -9,9 +9,13 @@
 //   - 内核解析器回退路径拨 [::1]:53 → connection refused
 //
 // 修复（仅在无 resolv.conf 时生效，其他平台零改动）：
-//  1. 替换全局默认解析器：直接向公共 DNS 发标准 UDP 查询；
+//  1. 替换全局默认解析器：向公共 DNS 发标准查询；
 //  2. 安装 dnsRedirectForPlatform 钩子（定义于 tun_stub_other.go）：
 //     把内核内部解析器回退的 [::1]:53 死地址重定向到公共 DNS。
+//
+// 查询传输：先 UDP 53，超时自动改 TCP 53 重试 —— 不少运营商网络对
+// UDP 53 限速/丢包，TCP 53 反而稳定；Go 解析器本身也有 TCP 兜底，
+// 这里把"引导服务器不可达"和"线路抖动"两种情况都兜住。
 package main
 
 import (
@@ -22,21 +26,36 @@ import (
 	"time"
 )
 
-// 阿里公共 DNS，国内外可达；Anycast，运营商网络普遍无劫持。
+// 阿里公共 DNS，国内外可达；UDP 53 / TCP 53 均开放。
 const androidBootstrapDNS = "223.5.5.5:53"
 
+const bootstrapQueryTimeout = 3 * time.Second
+
+func androidDialDNS(ctx context.Context, network, _ string) (net.Conn, error) {
+	// 带版本的网络（udp4/tcp6 等）保持原样；裸 udp/tcp 强制 IPv4，
+	// 避免设备无 IPv6 时向公共 DNS 发 AAAA 传输路径卡住。
+	if !strings.Contains(network, "4") && !strings.Contains(network, "6") {
+		if strings.HasPrefix(network, "tcp") {
+			network = "tcp4"
+		} else {
+			network = "udp4"
+		}
+	}
+	d := &net.Dialer{Timeout: bootstrapQueryTimeout}
+	// 裸 udp 首选，失败转 tcp（运营商对 UDP 53 限速/劫持时 TCP 往往可达）
+	if strings.HasPrefix(network, "udp") {
+		if c, err := d.DialContext(ctx, network, androidBootstrapDNS); err == nil {
+			return c, nil
+		}
+		return d.DialContext(ctx, "tcp4", androidBootstrapDNS)
+	}
+	return d.DialContext(ctx, network, androidBootstrapDNS)
+}
+
 func androidBootstrapResolver() *net.Resolver {
-	dialer := &net.Dialer{Timeout: 4 * time.Second}
 	return &net.Resolver{
 		PreferGo: true,
-		Dial: func(ctx context.Context, network, _ string) (net.Conn, error) {
-			// 带版本的网络（udp4/tcp6 等）保持原样；裸 udp/tcp 强制 IPv4，
-			// 避免设备无 IPv6 时向公共 DNS 发 AAAA 传输路径卡住。
-			if !strings.Contains(network, "4") && !strings.Contains(network, "6") {
-				network = "udp4"
-			}
-			return dialer.DialContext(ctx, network, androidBootstrapDNS)
-		},
+		Dial:     androidDialDNS,
 	}
 }
 

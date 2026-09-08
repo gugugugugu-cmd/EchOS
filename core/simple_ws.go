@@ -165,6 +165,12 @@ func dialSimpleWSTimeout(target string, timeout time.Duration) (net.Conn, error)
 		mt, data, err := ws.ReadMessage()
 		if err != nil {
 			_ = ws.Close()
+			// 连接/握手/认证都成功但迟迟等不到 CONNECTED，几乎总是
+			// Worker 侧兼容日期问题（README 红字：必须早于 2026 年），
+			// 把排查方向直接写在错误里，省得用户对着裸 i/o timeout 猜。
+			if ne, ok := err.(net.Error); ok && ne.Timeout() {
+				return nil, fmt.Errorf("等待 CONNECTED 超时：服务端无响应，请检查 Worker 兼容日期是否已设为 2026 年之前（如 Sep 15, 2025）")
+			}
 			return nil, fmt.Errorf("等待 CONNECTED 失败: %w", err)
 		}
 		if mt != websocket.TextMessage {
