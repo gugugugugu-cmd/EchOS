@@ -26,8 +26,13 @@ import (
 	"time"
 )
 
-// 阿里公共 DNS，国内外可达；UDP 53 / TCP 53 均开放。
-const androidBootstrapDNS = "223.5.5.5:53"
+// 阿里公共 DNS 任意播 IP 列表，UDP/TCP 53 均开放；
+// 某个 IP 在当前网络不可达时自动切换下一个。
+var androidBootstrapDNSList = []string{
+	"223.5.5.5:53",
+	"223.6.6.6:53",
+	"119.29.29.29:53", // 腾讯 DNSPod 公共 DNS（UDP/TCP 53）
+}
 
 const bootstrapQueryTimeout = 3 * time.Second
 
@@ -42,14 +47,30 @@ func androidDialDNS(ctx context.Context, network, _ string) (net.Conn, error) {
 		}
 	}
 	d := &net.Dialer{Timeout: bootstrapQueryTimeout}
-	// 裸 udp 首选，失败转 tcp（运营商对 UDP 53 限速/劫持时 TCP 往往可达）
-	if strings.HasPrefix(network, "udp") {
-		if c, err := d.DialContext(ctx, network, androidBootstrapDNS); err == nil {
-			return c, nil
+	// 依次尝试候选服务器；UDP 失败再试 TCP（运营商对 UDP 53 限速/劫持时
+	// TCP 53 往往可达）。
+	var lastErr error
+	for _, server := range androidBootstrapDNSList {
+		if strings.HasPrefix(network, "udp") {
+			if c, err := d.DialContext(ctx, "udp4", server); err == nil {
+				return c, nil
+			} else {
+				lastErr = err
+			}
+			if c, err := d.DialContext(ctx, "tcp4", server); err == nil {
+				return c, nil
+			} else {
+				lastErr = err
+			}
+		} else {
+			c, err := d.DialContext(ctx, network, server)
+			if err == nil {
+				return c, nil
+			}
+			lastErr = err
 		}
-		return d.DialContext(ctx, "tcp4", androidBootstrapDNS)
 	}
-	return d.DialContext(ctx, network, androidBootstrapDNS)
+	return nil, lastErr
 }
 
 func androidBootstrapResolver() *net.Resolver {
@@ -70,7 +91,7 @@ func init() {
 			return ""
 		}
 		if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
-			return androidBootstrapDNS
+			return androidBootstrapDNSList[0]
 		}
 		return "" // 非回环地址（可能是 TUN 网关 DNS）不干预
 	}

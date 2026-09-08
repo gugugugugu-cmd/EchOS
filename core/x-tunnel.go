@@ -1319,6 +1319,13 @@ func queryDoH(domain, dohURL string) (string, error) {
 	transport := &http.Transport{
 		Proxy:               nil,
 		DialContext:         func(ctx context.Context, network, addr string) (net.Conn, error) {
+			// 已知公共 DoH 直接拨 IP，跳过对 DoH 域名自身的解析
+			//（避免引导 DNS 不可用时 ECH 公钥查询死循环）。
+			if host, port, err := net.SplitHostPort(addr); err == nil {
+				if mapped := dnsHostOverride(host); mapped != host {
+					addr = net.JoinHostPort(mapped, port)
+				}
+			}
 			return dialPhysicalIPv4First(dialer, ctx, network, addr)
 		},
 		TLSHandshakeTimeout: 3 * time.Second,

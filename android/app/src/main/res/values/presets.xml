@@ -2,6 +2,7 @@
 <resources>
     <!-- 与 macOS 版 gui/Sources/Config.swift EchPresets 保持一致 -->
     <string-array name="doh_presets">
+        <item>阿里 DoH IP 直连（推荐，免解析）|https://223.5.5.5/dns-query</item>
         <item>阿里 DoH（国内推荐）|dns.alidns.com/dns-query</item>
         <item>腾讯国密 DoH（国内）|sm2.doh.pub/dns-query</item>
         <item>360 DoH（国内）|doh.360.cn/dns-query</item>
